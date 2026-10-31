@@ -205,6 +205,8 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
             continue
         try:
             res, v, fmap, dem, est, meta = mtg.analyser(t0 + dt.timedelta(minutes=1))
+        except mtg.LicenceManquante as e:
+            print(f"  MTG : {e}"); return
         except Exception as e:
             print(f"  MTG {t0:%H:%M} : échec ({e})"); continue
         save_analysis(res, np.nan_to_num(fmap), meta)

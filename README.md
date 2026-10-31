@@ -29,7 +29,7 @@ cd web && python3 -m http.server 8000        # puis http://localhost:8000
 `mtg.py` télécharge uniquement le chunk FCI HRFI qui couvre Grenoble (n° 36/40) et corrige la parallaxe
 (un point à l'altitude z apparaît décalé de ≈ 1,29 z vers le nord). Nécessite `EUMETSAT_CONSUMER_KEY` et
 `EUMETSAT_CONSUMER_SECRET` (environnement local, ou secrets GitHub Actions pour la mise à jour automatique).
-**Recherche catalogue testée ; téléchargement, lecture et seuils du canal 2,2 µm pas encore validés sur données réelles.**
+**Recherche catalogue testée (31/10/2026 : chunk 36 présent sur toutes les images, visée 52,4° / az. 188°). Téléchargement bloqué : l'API renvoie 403 « GeneralLicense required to access this collection » (HRFI 0665 et FDHSI 0662) tant que la licence de données MTG n'est pas acceptée sur le compte EUMETSAT. Lecture, seuils du canal 2,2 µm et calibrage contre VIIRS (1 220-1 264 m le 31/10 entre 12 h et 13 h UTC) restent à faire.**
 
 ```bash
 python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte

@@ -56,7 +56,7 @@ def parallaxe_utm(lat=LAT, lon=LON):
 
 def chunks_utiles(lat_min=BBOX[1], lat_max=BBOX[3], lon=LON):
     """N° des chunks (1 = sud, 40 = nord) qui couvrent la bande de latitude, d'après la grille FCI."""
-    from satpy.resample import get_area_def
+    from satpy.area import get_area_def
     a = get_area_def("mtg_fci_fdss_1km")
     n = a.shape[0]
     out = set()
@@ -89,6 +89,10 @@ def chercher(debut, fin):
     return sorted(out, key=lambda x: x[1])
 
 
+class LicenceManquante(RuntimeError):
+    """Le compte EUMETSAT n'a pas accepté la licence de données requise pour la collection."""
+
+
 def jeton():
     key, secret = os.environ.get("EUMETSAT_CONSUMER_KEY"), os.environ.get("EUMETSAT_CONSUMER_SECRET")
     if not key or not secret:
@@ -104,6 +108,9 @@ def telecharger(url, dossier, token):
     dst = os.path.join(dossier, nom)
     if not os.path.exists(dst):
         with requests.get(url, headers={"Authorization": f"Bearer {token}"}, stream=True, timeout=300) as r:
+            if r.status_code == 403 and "License" in r.text:
+                raise LicenceManquante(f"téléchargement refusé par EUMETSAT ({r.text.strip()[:200]}) : "
+                                       "accepter la licence de données MTG sur le compte EUMETSAT")
             r.raise_for_status()
             with open(dst + ".part", "wb") as f:
                 for c in r.iter_content(1 << 20): f.write(c)
