@@ -300,7 +300,7 @@ function renderChart() {
   for (const a of obs) {
     const x = X(Date.parse(a.date_utc));
     el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-2)", "stroke-width": 2 }, svg);
-    el("circle", { cx: x, cy: Y(a.sommet_m), r: 4.5, fill: "var(--series-2)", stroke: "var(--surface-1)", "stroke-width": 2 }, svg);
+    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur === "MTG-FCI" ? 3 : 4.5, fill: "var(--series-2)", stroke: "var(--surface-1)", "stroke-width": a.capteur === "MTG-FCI" ? 1 : 2 }, svg);
   }
   // survol : réticule vertical + infobulle
   const hair = el("line", { y1: m.t, y2: Hh - m.b, stroke: "var(--text-muted)", "stroke-width": 1, visibility: "hidden" }, svg);
@@ -310,7 +310,8 @@ function renderChart() {
     const r = svg.getBoundingClientRect(), sx = ((e.clientX - r.left) / r.width) * W;
     const t = t0 + ((sx - m.l) / (W - m.l - m.r)) * (t1 - t0);
     const h = fc.reduce((b, x) => (Math.abs(Date.parse(x.t) - t) < Math.abs(Date.parse(b.t) - t) ? x : b), fc[0]);
-    const o = obs.find((a) => Math.abs(Date.parse(a.date_utc) - t) < 1.5 * 3.6e6);
+    const o = obs.filter((a) => Math.abs(Date.parse(a.date_utc) - t) < 1.5 * 3.6e6)
+      .sort((a, b) => Math.abs(Date.parse(a.date_utc) - t) - Math.abs(Date.parse(b.date_utc) - t))[0];
     if (!h) return;
     hair.setAttribute("x1", X(Date.parse(h.t))); hair.setAttribute("x2", X(Date.parse(h.t))); hair.setAttribute("visibility", "visible");
     tip.replaceChildren();
@@ -320,7 +321,7 @@ function renderChart() {
       const b = document.createElement("strong"); b.textContent = val; const l = document.createElement("span"); l.textContent = lab;
       d.append(s, b, l); tip.appendChild(d); };
     row("var(--series-1)", h.sommet_lisse_m != null ? `${nf.format(h.sommet_lisse_m)} m` : "—", "AROME");
-    if (o) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, `${o.satellite} ${fmtHour.format(new Date(o.date_utc))} h`);
+    if (o) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, `${o.satellite} ${new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(o.date_utc))}`);
     tip.hidden = false; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY - 10}px`;
   });
   hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });

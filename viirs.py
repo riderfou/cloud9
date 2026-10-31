@@ -30,14 +30,19 @@ def load(dirn, tag):
     out["x"], out["y"] = np.array(x).reshape(out["lat"].shape), np.array(y).reshape(out["lat"].shape)
     return out
 
-def cloud_fraction(v):
-    """Fraction nuageuse 0..1 par pixel : visible brillant ET 1,6 µm brillant (la neige y est sombre)."""
+# Seuils par capteur : "I3" est le canal infrarouge court où la neige est sombre
+# (1,6 µm pour VIIRS ; 2,2 µm pour MTG-FCI HRFI, où les nuages d'eau sont un peu moins brillants).
+SEUILS_VIIRS = {"neige_swir_max": 0.15, "nuage_swir_min": 0.30}
+
+
+def cloud_fraction(v, seuils=SEUILS_VIIRS):
+    """Fraction nuageuse 0..1 par pixel : visible brillant ET infrarouge court brillant (la neige y est sombre)."""
     i1, i3 = v["I1"], v["I3"]
     ndsi = (i1 - i3) / np.maximum(i1 + i3, 1e-6)
-    snow = (ndsi > 0.35) & (i3 < 0.15)
+    snow = (ndsi > 0.35) & (i3 < seuils["neige_swir_max"])
     # références auto-calibrées sur l'image (dépendent de l'éclairage, de l'épaisseur du nuage...)
     ins = (v["x"] > m2n.AOI[0]) & (v["x"] < m2n.AOI[2]) & (v["y"] > m2n.AOI[1]) & (v["y"] < m2n.AOI[3]) & ~snow
-    cloudy = ins & (i3 > 0.3) & (i1 > 0.25)
+    cloudy = ins & (i3 > seuils["nuage_swir_min"]) & (i1 > 0.25)
     clearp = ins & (i1 < 0.2)
     cloud_ref = float(np.nanmedian(i1[cloudy])) if cloudy.sum() > 200 else 0.6
     clear_ref = float(np.nanmedian(i1[clearp])) if clearp.sum() > 200 else 0.06
@@ -57,15 +62,25 @@ def robust_core(h, bw=40.0, half=250.0):
     return h[np.abs(h - mode) < half]
 
 def analyse(dirn, tag, label):
-    v = load(dirn, tag)
-    f, ndsi = cloud_fraction(v)
+    return analyse_pixels(load(dirn, tag), label)
+
+
+def analyse_pixels(v, label, capteur="VIIRS 375 m", seuils=SEUILS_VIIRS, max_dist=700.0, parallaxe=(0.0, 0.0),
+                   min_points=150):
+    """v : dict de tableaux 2D x, y (UTM 31, m), I1 (visible), I3 (infrarouge court), vza (degrés).
+    parallaxe : déplacement apparent (m) par mètre d'altitude (dx, dy). Nul pour une géolocalisation
+    corrigée du relief (VIIRS GITCO) ; ≈ tan(vza) × direction opposée au satellite pour MTG."""
+    f, ndsi = cloud_fraction(v, seuils)
     dem = m2n.load_dem()
-    # attribution de chaque point MNT (20 m) au pixel VIIRS le plus proche (empreinte de Voronoï)
+    # attribution de chaque point MNT (20 m) au pixel le plus proche de sa position APPARENTE
+    # (empreinte de Voronoï ; avec parallaxe, un point en altitude apparaît décalé)
     ok = np.isfinite(v["x"]) & np.isfinite(f)
     tree = cKDTree(np.c_[v["x"][ok], v["y"][ok]])
     jj, ii = np.meshgrid(np.arange(m2n.W), np.arange(m2n.H))
     X = m2n.AOI[0] + (jj + .5) * m2n.RES; Y = m2n.AOI[3] - (ii + .5) * m2n.RES
-    dist, idx = tree.query(np.c_[X.ravel(), Y.ravel()], distance_upper_bound=700)
+    zz = np.nan_to_num(dem, nan=0.0)
+    X = X + zz * parallaxe[0]; Y = Y + zz * parallaxe[1]
+    dist, idx = tree.query(np.c_[X.ravel(), Y.ravel()], distance_upper_bound=max_dist)
     has = np.isfinite(dist) & np.isfinite(dem.ravel())
     pix = np.where(has, idx, -1)
     fv = f[ok]
@@ -76,7 +91,7 @@ def analyse(dirn, tag, label):
     est = []
     for p in np.where((fv > 0.15) & (fv < 0.85))[0]:
         z = z_sorted[bounds[p]:bounds[p + 1]]
-        if len(z) < 150 or np.ptp(z) < 120:  # pixel incomplet ou trop plat : peu informatif
+        if len(z) < min_points or np.ptp(z) < 120:  # pixel incomplet ou trop plat : peu informatif
             continue
         est.append((p, float(np.quantile(z, fv[p])), float(np.ptp(z))))
     est = np.array(est)
@@ -106,7 +121,7 @@ def analyse(dirn, tag, label):
                 s = keep & (px >= x0) & (px < x0 + 5000) & (py >= y0) & (py < y0 + 5000)
                 if s.sum() >= 4:
                     grid.append({"x": float(x0 + 2500), "y": float(y0 + 2500), "h": float(np.median(h[s])), "n": int(s.sum())})
-    res = {"scene": label, "capteur": "VIIRS 375 m", "n_pixels_bord": int(len(hf)),
+    res = {"scene": label, "capteur": capteur, "n_pixels_bord": int(len(hf)),
            "h_bords_quantiles_10_25_50_75_90": q, "ecart_interquartile_m": float(iqr),
            "mer_de_nuages_detectee": detected, "remplissage_sous_H": remplissage, "sommet_estime_m": float(q[2]) if detected else None,
            "incertitude_m": float(iqr / 2) if detected else None,

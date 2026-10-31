@@ -9,6 +9,7 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 |---|---|
 | `mer2nuages.py` | Méthode Sentinel-2 (20 m) : masque nuage bas + altitude des bords latéraux |
 | `viirs.py` | Méthode VIIRS (375 m) : fraction nuageuse par pixel + MNT 20 m à l'intérieur du pixel |
+| `mtg.py` | Meteosat MTG-FCI (500 m, toutes les 10 min) : chunk 36 seulement, correction de parallaxe (identifiants EUMETSAT) |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
 | `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |
@@ -21,6 +22,18 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 python3 pipeline.py statique                 # relief, texture, sommets (une fois)
 python3 pipeline.py tout                     # VIIRS du jour + Sentinel-2 récents + AROME + index
 cd web && python3 -m http.server 8000        # puis http://localhost:8000
+```
+
+## Meteosat MTG (en cours)
+
+`mtg.py` télécharge uniquement le chunk FCI HRFI qui couvre Grenoble (n° 36/40) et corrige la parallaxe
+(un point à l'altitude z apparaît décalé de ≈ 1,29 z vers le nord). Nécessite `EUMETSAT_CONSUMER_KEY` et
+`EUMETSAT_CONSUMER_SECRET` (environnement local, ou secrets GitHub Actions pour la mise à jour automatique).
+**Recherche catalogue testée ; téléchargement, lecture et seuils du canal 2,2 µm pas encore validés sur données réelles.**
+
+```bash
+python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte
+python3 mtg.py analyser 2026-10-31T10:50                     # avec identifiants -> out/mtg_*.png
 ```
 
 ## Validation (31/10/2026 et cas passés)
