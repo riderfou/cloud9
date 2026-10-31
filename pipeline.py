@@ -1,0 +1,263 @@
+"""
+Pipeline mer2nuages : produit les données de la webapp dans web/data/.
+
+  python3 pipeline.py statique            # relief, texture, sommets (une fois)
+  python3 pipeline.py viirs AAAA/MM/JJ    # passages VIIRS du jour (≈ 11 h - 14 h UTC)
+  python3 pipeline.py s2 [jours]          # scènes Sentinel-2 récentes (défaut : 5 derniers jours)
+  python3 pipeline.py arome               # prévision AROME (Open-Meteo)
+  python3 pipeline.py tout                # viirs du jour + s2 + arome + index
+
+À lancer toutes les 30 min entre 11 h et 15 h UTC (VIIRS) et toutes les 3 h (AROME).
+"""
+import sys, os, json, glob, shutil, datetime as dt, re
+import numpy as np, requests
+from PIL import Image
+from scipy import ndimage
+from rasterio.warp import transform as wtransform
+import mer2nuages as m2n
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(ROOT, "web", "data")
+STEP = 5  # 5 x 20 m = grille web à 100 m
+GW, GH = m2n.W // STEP, m2n.H // STEP
+
+
+def down(a, reducer=np.nanmean):
+    a = a[:GH * STEP, :GW * STEP].reshape(GH, STEP, GW, STEP)
+    return reducer(reducer(a, axis=3), axis=1)
+
+
+def write_json(name, obj):
+    os.makedirs(os.path.dirname(os.path.join(OUT, name)), exist_ok=True)
+    with open(os.path.join(OUT, name), "w") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def to_lonlat(x, y):
+    lo, la = wtransform(m2n.CRS, "EPSG:4326", [x], [y])
+    return round(lo[0], 5), round(la[0], 5)
+
+
+# ------------------------------------------------------------------ statique
+SOMMETS = [  # nom, lat, lon, altitude officielle (m), type
+    ("Grenoble (centre)", 45.188, 5.724, 214, "lieu"),
+    ("La Bastille", 45.1985, 5.7255, 476, "lieu"),
+    ("Mont Rachais", 45.2125, 5.7330, 1046, "sommet"),
+    ("Néron", 45.2250, 5.7000, 1299, "sommet"),
+    ("Mont Saint-Eynard", 45.2360, 5.7740, 1379, "sommet"),
+    ("Le Sappey-en-Chartreuse", 45.2620, 5.7760, 1000, "lieu"),
+    ("Col de Porte", 45.2920, 5.7680, 1326, "lieu"),
+    ("Chamechaude", 45.2880, 5.7880, 2082, "sommet"),
+    ("Charmant Som", 45.3080, 5.7280, 1867, "sommet"),
+    ("Dent de Crolles", 45.3100, 5.8530, 2062, "sommet"),
+    ("Saint-Hilaire-du-Touvet", 45.3050, 5.8870, 1000, "lieu"),
+    ("Mont Granier", 45.4658, 5.9381, 1933, "sommet"),
+    ("Saint-Nizier-du-Moucherotte", 45.1670, 5.6330, 1168, "lieu"),
+    ("Moucherotte", 45.1500, 5.6300, 1901, "sommet"),
+    ("Lans-en-Vercors", 45.1280, 5.5880, 1020, "lieu"),
+    ("Pic Saint-Michel", 45.0919, 5.6061, 1966, "sommet"),
+    ("Uriage", 45.1430, 5.8280, 414, "lieu"),
+    ("Croix de Chamrousse", 45.1240, 5.8890, 2253, "sommet"),
+    ("Grand Colon", 45.1410, 5.9570, 2394, "sommet"),
+    ("Croix de Belledonne", 45.1825, 5.9997, 2926, "sommet"),
+    ("Prapoutel (7 Laux)", 45.2550, 5.9900, 1400, "lieu"),
+]
+
+
+def statique():
+    os.makedirs(OUT, exist_ok=True)
+    dem = m2n.load_dem()
+    # relief à 100 m, encodage "terrarium" (R*256 + G + B/256 - 32768)
+    z = down(dem)
+    z = np.where(np.isfinite(z), z, 0) + 32768.0
+    rgb = np.dstack([np.floor(z / 256), np.floor(z % 256), np.floor((z % 1) * 256)]).astype(np.uint8)
+    Image.fromarray(rgb).save(os.path.join(OUT, "relief.png"))
+    # texture : Sentinel-2 couleurs naturelles d'une journée dégagée, 30 m
+    import rasterio
+    from rasterio.windows import from_bounds
+    from rasterio.enums import Resampling
+    scene = "S2C_31TGL_20251104_0_L2A"
+    url = f"{m2n.S2}/2025/11/{scene}/TCI.tif"
+    tw, th = m2n.W * 2 // 3, m2n.H * 2 // 3
+    with rasterio.open(url) as s:
+        a = s.read(window=from_bounds(*m2n.AOI, s.transform), out_shape=(3, th, tw),
+                   resampling=Resampling.average, boundless=True, fill_value=0)
+    a = np.moveaxis(a, 0, -1).astype("float32")
+    a = np.clip((a / 255.0) ** 0.85 * 1.15, 0, 1) * 255
+    Image.fromarray(a.astype(np.uint8)).save(os.path.join(OUT, "texture.jpg"), quality=82)
+    # sommets : position recalée sur le point le plus haut du MNT à moins de 300 m
+    out = []
+    for nom, la, lo, alt, typ in SOMMETS:
+        x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
+        j, i = int((x - m2n.AOI[0]) / m2n.RES), int((m2n.AOI[3] - y) / m2n.RES)
+        if not (0 <= i < m2n.H and 0 <= j < m2n.W):
+            continue
+        if typ == "sommet":
+            # maximum local (600 m) dont l'altitude MNT colle à l'altitude officielle, le plus proche (< 5 km)
+            r = 250
+            i0, j0 = max(i - r, 0), max(j - r, 0)
+            win = dem[i0:i + r, j0:j + r]
+            loc = (win == ndimage.maximum_filter(np.nan_to_num(win, nan=-1), size=31)) & (np.abs(win - alt) < 80)
+            ci, cj = np.where(loc)
+            if len(ci):
+                k = np.argmin((ci + i0 - i) ** 2 + (cj + j0 - j) ** 2)
+                i, j = ci[k] + i0, cj[k] + j0
+        zdem = float(dem[i, j])
+        out.append({"nom": nom, "type": typ, "alt": alt, "alt_mnt": round(zdem),
+                    "x": m2n.AOI[0] + (j + .5) * m2n.RES, "y": m2n.AOI[3] - (i + .5) * m2n.RES})
+        if abs(zdem - alt) > 100:
+            print(f"  ⚠ {nom}: altitude MNT {zdem:.0f} m vs officielle {alt} m")
+    write_json("sommets.json", out)
+    write_json("meta.json", {"crs": m2n.CRS, "aoi": m2n.AOI, "grille_web": [GW, GH], "pas_m": m2n.RES * STEP,
+                             "texture": {"scene": scene}, "relief": "Copernicus DEM GLO-30"})
+    print("statique OK", GW, GH, len(out), "lieux")
+
+
+# ------------------------------------------------------------------ analyses
+def save_analysis(res, frac20, meta):
+    """frac20 : fraction nuageuse (0..1) sur la grille 20 m."""
+    aid = meta["id"]
+    f = down(frac20.astype("float32"))
+    alpha = (np.clip(np.nan_to_num(f), 0, 1) * 255).astype(np.uint8)
+    Image.fromarray(alpha, "L").save(os.path.join(OUT, "analyses", f"{aid}.png"), optimize=True)
+    mailles = [{"x": g["x"], "y": g["y"], "h": round(g["h"]), "n": g["n"]} for g in res.get("mailles", [])]
+    rec = {**meta,
+           "detectee": res["mer_de_nuages_detectee"],
+           "sommet_m": None if res.get("sommet_estime_m") is None else round(res["sommet_estime_m"]),
+           "incertitude_m": None if res.get("incertitude_m") is None else round(res["incertitude_m"]),
+           "quantiles": [None if (q != q) else round(q) for q in res["h_bords_quantiles_10_25_50_75_90"]],
+           "n_bords": res["n_pixels_bord"], "mailles": mailles, "masque": f"analyses/{aid}.png"}
+    for k in ("remplissage_sous_H", "inclinaison", "angle_zenithal_satellite"):
+        if res.get(k) is not None:
+            rec[k] = res[k]
+    write_json(f"analyses/{aid}.json", rec)
+    print(f"  {aid}: détectée={rec['detectee']} sommet={rec['sommet_m']} ± {rec['incertitude_m']}")
+    return rec
+
+
+def run_viirs(date):
+    import viirs, viirs_find
+    os.makedirs(os.path.join(OUT, "analyses"), exist_ok=True)
+    for bucket, key, dist in viirs_find.find(date):
+        tag = key.split("_")[3]
+        sat = viirs_find.BUCKETS[bucket]
+        d = key.split("_")[2][1:]
+        aid = f"viirs_{sat.lower().replace('-', '')}_{d}_{tag[1:5]}"
+        if os.path.exists(os.path.join(OUT, "analyses", f"{aid}.json")):
+            continue
+        tmp = os.path.join(ROOT, "tmp_" + aid)
+        os.system(f"python3 {ROOT}/viirs_fetch.py {bucket} {date} {tag} {tmp} > /dev/null")
+        try:
+            res, v, fmap, dem, est = viirs.analyse(tmp, tag, aid)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        t = dt.datetime.strptime(d + tag[1:7], "%Y%m%d%H%M%S").replace(tzinfo=dt.timezone.utc)
+        save_analysis(res, np.nan_to_num(fmap), {"id": aid, "date_utc": t.isoformat(), "capteur": "VIIRS",
+                                                  "satellite": sat, "resolution_m": 375})
+
+
+def run_s2(days=5):
+    os.makedirs(os.path.join(OUT, "analyses"), exist_ok=True)
+    today = dt.date.today()
+    months = sorted({(today - dt.timedelta(d)).strftime("%Y/%-m") for d in range(days + 1)})
+    for ym in months:
+        x = requests.get(f"https://sentinel-cogs.s3.us-west-2.amazonaws.com/?list-type=2&prefix=sentinel-s2-l2a-cogs/31/T/GL/{ym}/&delimiter=/").text
+        for scene in re.findall(r"(S2[ABC]_31TGL_\d{8}_\d_L2A)/</Prefix>", x):
+            d = dt.datetime.strptime(scene.split("_")[2], "%Y%m%d").date()
+            if (today - d).days > days:
+                continue
+            aid = f"s2_{scene.split('_')[2]}_{scene[:3].lower()}{scene.split('_')[3]}"
+            if os.path.exists(os.path.join(OUT, "analyses", f"{aid}.json")):
+                continue
+            meta_url = f"{m2n.S2}/{ym}/{scene}/{scene}.json"
+            try:
+                when = requests.get(meta_url, timeout=30).json()["properties"]["datetime"]
+            except Exception:
+                when = d.isoformat() + "T10:50:00Z"
+            try:
+                res, cloud, acc, hs = m2n.estimate(scene, m2n.load_dem())
+            except Exception as e:
+                print("  échec", scene, e); continue
+            save_analysis(res, cloud.astype("float32"), {"id": aid, "date_utc": when.replace("Z", "+00:00"),
+                                                          "capteur": "Sentinel-2", "satellite": scene[:3],
+                                                          "resolution_m": 20})
+
+
+# ------------------------------------------------------------------ AROME
+NIVEAUX = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600]
+
+
+def sommet_arome(z, rh, t, seuil=80.0):
+    """Sommet de la couche humide de basse couche : altitude où l'humidité relative repasse sous `seuil`
+    en montant. None si la basse couche n'est pas humide ou si l'humidité monte trop haut (couvert)."""
+    ok = [k for k in range(len(z)) if z[k] is not None and rh[k] is not None and z[k] > 230]
+    z = [z[k] for k in ok]; rh = [rh[k] for k in ok]; t = [t[k] for k in ok]
+    if len(z) < 3 or rh[0] < seuil:
+        return None
+    for k in range(1, len(z)):
+        if rh[k] < seuil:
+            h = z[k - 1] + (rh[k - 1] - seuil) / (rh[k - 1] - rh[k]) * (z[k] - z[k - 1])
+            return round(h) if h < 3000 else None
+    return None
+
+
+def lisser(heures):
+    """Médiane glissante sur 3 h (l'heuristique heure par heure est bruitée)."""
+    vals = [hh["sommet_m"] for hh in heures]
+    for i, hh in enumerate(heures):
+        w = [v for v in vals[max(i - 1, 0):i + 2] if v is not None]
+        hh["sommet_lisse_m"] = round(float(np.median(w))) if len(w) >= 2 else None
+
+
+def run_arome(lat=45.25, lon=5.85):
+    var = []
+    for p in NIVEAUX:
+        var += [f"temperature_{p}hPa", f"relative_humidity_{p}hPa", f"geopotential_height_{p}hPa"]
+    r = requests.get("https://api.open-meteo.com/v1/meteofrance", timeout=60, params={
+        "latitude": lat, "longitude": lon, "hourly": ",".join(var + ["temperature_2m", "relative_humidity_2m", "cloud_cover_low"]),
+        "past_days": 1, "forecast_days": 2, "timezone": "UTC"}).json()
+    if "hourly" not in r:  # quota dépassé, panne... : on garde le fichier précédent
+        print("AROME indisponible :", r.get("reason", r)); return
+    h = r["hourly"]
+    niveaux = [p for p in NIVEAUX if any(v is not None for v in h.get(f"geopotential_height_{p}hPa", []))
+               and any(v is not None for v in h.get(f"relative_humidity_{p}hPa", []))]
+    heures = []
+    for i, t in enumerate(h["time"]):
+        z = [h[f"geopotential_height_{p}hPa"][i] for p in niveaux]
+        rh = [h[f"relative_humidity_{p}hPa"][i] for p in niveaux]
+        tt = [h[f"temperature_{p}hPa"][i] for p in niveaux]
+        heures.append({"t": t + ":00+00:00", "sommet_m": sommet_arome(z, rh, tt),
+                       "profil": [{"p": p, "z": zz, "rh": r_, "T": t_} for p, zz, r_, t_ in zip(niveaux, z, rh, tt)
+                                  if zz is not None and r_ is not None and t_ is not None]})
+    lisser(heures)
+    write_json("arome.json", {"source": "AROME / ARPEGE Météo-France via Open-Meteo", "lat": lat, "lon": lon,
+                              "maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
+                              "seuil_humidite": 80, "heures": heures})
+    print("AROME OK", len(heures), "heures, niveaux", niveaux)
+
+
+# ------------------------------------------------------------------ index
+def index():
+    recs = []
+    for f in sorted(glob.glob(os.path.join(OUT, "analyses", "*.json"))):
+        r = json.load(open(f))
+        recs.append({k: r.get(k) for k in ("id", "date_utc", "capteur", "satellite", "resolution_m", "detectee",
+                                           "sommet_m", "incertitude_m", "remplissage_sous_H")})
+    recs.sort(key=lambda r: r["date_utc"])
+    det = [r for r in recs if r["detectee"]]
+    write_json("historique.json", {"maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
+                                   "analyses": recs, "derniere_detection": det[-1]["id"] if det else None,
+                                   "derniere_analyse": recs[-1]["id"] if recs else None})
+    print("index OK", len(recs), "analyses")
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "tout"
+    if cmd == "statique": statique()
+    elif cmd == "viirs": run_viirs(sys.argv[2] if len(sys.argv) > 2 else dt.date.today().strftime("%Y/%m/%d"))
+    elif cmd == "s2": run_s2(int(sys.argv[2]) if len(sys.argv) > 2 else 5)
+    elif cmd == "arome": run_arome()
+    elif cmd == "tout":
+        if not os.path.exists(os.path.join(OUT, "relief.png")): statique()
+        run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome()
+    if cmd != "statique": index()

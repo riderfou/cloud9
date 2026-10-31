@@ -1,0 +1,9 @@
+numpy
+scipy
+rasterio
+requests
+pillow
+matplotlib
+h5py
+fsspec
+aiohttp

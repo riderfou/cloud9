@@ -1,0 +1,7 @@
+__pycache__/
+*.npy
+viirs*/
+tmp_*/
+scan/
+out/
+*.h5
