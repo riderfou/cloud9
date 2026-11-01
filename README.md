@@ -17,6 +17,7 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 | `web/editeur-webcams.html` | Éditeur en ligne de ces corrections : glisser-déposer des webcams sur une carte topographique, export du fichier |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
 | `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets, webcams, observations Météo-France (`obs_mf.json`, clé `MF_OBS_API_KEY`, API DPObs v2) |
+| `pipeline.py vent` | Champ de vent AROME sur une grille 11 × 11 de la zone (`web/data/vent.json`, u/v heure par heure à 10 m et 850 hPa), animé en particules dans la webapp |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |
 | `.github/workflows/pipeline.yml` | Mise à jour automatique + publication sur GitHub Pages |
 | `scan_dates.py` | Planche contact Sentinel-2 pour repérer des journées de mer de nuages |

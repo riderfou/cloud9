@@ -82,6 +82,15 @@
       <label id="lbl-cells"><input type="checkbox" id="t-cells"> Altitudes mesurées (maille de 5 km)</label>
       <label><input type="checkbox" id="t-labels" checked> Sommets et lieux</label>
       <label><input type="checkbox" id="t-cams" checked> Webcams</label>
+      <label><input type="checkbox" id="t-vent" checked> Vent (animation)</label>
+      <div class="nappe-ctrl" id="vent-ctrl" hidden>
+        <div class="niveaux-vent" role="radiogroup" aria-label="Altitude du vent">
+          <label><input type="radio" name="niveau-vent" value="sol" checked> Au sol</label>
+          <label><input type="radio" name="niveau-vent" value="1500m"> À 1 500 m</label>
+        </div>
+        <div class="vent-legende" id="vent-legende" aria-hidden="true"></div>
+        <p class="note" id="vent-info"></p>
+      </div>
       <label><input type="checkbox" id="t-exag"> Relief ×1,5</label>
     </div>
   </section>
