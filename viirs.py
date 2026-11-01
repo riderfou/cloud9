@@ -73,7 +73,8 @@ def analyse_pixels(v, label, capteur="VIIRS 375 m", seuils=SEUILS_VIIRS, max_dis
     voisin_couvert : si renseigné (m), un pixel de bord n'est retenu que s'il a, dans ce rayon, un pixel
     entièrement couvert (fraction > 0,85) : le bord d'une nappe touche la nappe. Écarte les pentes
     rocheuses bien éclairées, plus brillantes que la référence « sol », isolées en haute montagne."""
-    f, ndsi = cloud_fraction(v, seuils)
+    # fraction nuageuse fournie (méthode de nuit, infrarouge) ou calculée sur le visible / infrarouge court
+    f = v["frac"] if "frac" in v else cloud_fraction(v, seuils)[0]
     dem = m2n.load_dem()
     # attribution de chaque point MNT (20 m) au pixel le plus proche de sa position APPARENTE
     # (empreinte de Voronoï ; avec parallaxe, un point en altitude apparaît décalé)

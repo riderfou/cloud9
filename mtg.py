@@ -147,6 +147,33 @@ def lire(fichiers, quand):
     return v
 
 
+def lire_nuit(fichiers, quand):
+    """Nuit : nuage bas d'après l'écart de température de brillance 10,5 - 3,8 µm (canaux à 1 km).
+    Les gouttelettes d'un nuage bas émettent moins à 3,8 µm : écart de +2 à +5 K ; sol dégagé ou neige : ~0 K.
+    Renvoie le dict attendu par viirs.analyse_pixels, avec la fraction nuageuse dans v["frac"]."""
+    from satpy import Scene
+    scn = Scene(reader="fci_l1c_nc", filenames=fichiers)
+    scn.load(["ir_38", "ir_105"])
+    scn = scn.crop(ll_bbox=BBOX)
+    lon, lat = scn["ir_105"].attrs["area"].get_lonlats()
+    btd = np.asarray(scn["ir_105"].values - scn["ir_38"].values, "float32")
+    # références auto-calibrées sur l'image, comme de jour (bornées pour rester physiques)
+    nuage = float(np.clip(np.nanmedian(btd[btd > 2.0]), 2.5, 6.0)) if (btd > 2.0).sum() > 100 else 3.5
+    clair = float(np.clip(np.nanmedian(btd[btd < 1.2]), -1.0, 1.0)) if (btd < 1.2).sum() > 100 else 0.3
+    v = {"frac": np.clip((btd - clair) / max(nuage - clair, 0.5), 0, 1), "btd": btd, "lat": lat, "lon": lon,
+         "bt105": np.asarray(scn["ir_105"].values, "float32"), "refs": {"sol": clair, "nuage": nuage}}
+    ok = np.isfinite(lon) & np.isfinite(lat)
+    x = np.full(lon.shape, np.nan); y = np.full(lon.shape, np.nan)
+    xx, yy = wtransform("EPSG:4326", m2n.CRS, lon[ok].tolist(), lat[ok].tolist())
+    x[ok], y[ok] = xx, yy
+    v["x"], v["y"] = x, y
+    v["vza"] = np.full(lon.shape, visee()[0])
+    return v
+
+
+PARAMS_NUIT = dict(capteur="MTG-FCI IR 1 km (nuit)", max_dist=2000.0, min_points=1000, voisin_couvert=2000.0)
+
+
 def analyser(instant, dossier=None, garder=False):
     """Analyse l'image MTG la plus proche de `instant` (datetime UTC). Renvoie (res, v, fmap, dem, est, meta)."""
     import viirs
