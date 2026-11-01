@@ -208,7 +208,7 @@ async function showAnalysis(id, synthese = false) {
   const t = new THREE.CanvasTexture(cvm); t.flipY = true;
   if (obsMat.alphaMap) obsMat.alphaMap.dispose();
   obsMat.alphaMap = t; obsMat.needsUpdate = true;
-  setCells(a.detectee ? a.mailles : []);
+  setCells(VALIDE(a) ? a.mailles : []);
   document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
   renderEtat(synthese ? etatCourant() : etatDeAnalyse(a));
 }
@@ -223,17 +223,21 @@ const mediane = (xs) => { const s = [...xs].sort((p, q) => p - q), k = s.length 
 const situationDe = (a) => a.situation || (a.detectee ? "mer" : "indetermine");
 const VALIDE = (a) => a.detectee && a.sommet_m != null;
 const SIT = {
-  mer:        { chip: "good", court: null,                  txt: "✓ Mer de nuages" },
-  degradee:   { chip: "warn", court: "se dégrade",          txt: "⚠ Mer de nuages qui se dégrade : des nuages accrochent les sommets" },
-  disloquee:  { chip: "warn", court: "disloquée",           txt: "Pas de mer de nuages : nappe disloquée, nuages accrochés aux sommets" },
-  couvert:    { chip: "info", court: "ciel couvert",        txt: "Pas de mer de nuages : ciel couvert" },
-  degage:     { chip: "info", court: "pas de nuages bas",   txt: "Pas de mer de nuages : pas de nuages bas" },
-  indetermine:{ chip: "info", court: "non détectée",        txt: "Pas de mer de nuages nette sur cette image" },
+  mer:        { etat: "mer",     statut: "Mer de nuages",                   court: null },
+  degradee:   { etat: "alerte",  statut: "Mer de nuages qui se dégrade",    court: "se dégrade",
+                note: "Des nuages commencent à accrocher les sommets" },
+  disloquee:  { etat: "absente", statut: "Pas de mer de nuages",            court: "disloquée",
+                titre: "Nappe disloquée", note: "Des nuages accrochent les sommets" },
+  couvert:    { etat: "absente", statut: "Pas de mer de nuages",            court: "ciel couvert", titre: "Ciel couvert" },
+  degage:     { etat: "absente", statut: "Pas de mer de nuages",            court: "pas de nuages bas", titre: "Pas de nuages bas" },
+  indetermine:{ etat: "absente", statut: "Pas de mer de nuages nette",      court: "non détectée", titre: "Situation incertaine" },
 };
 const AIR = { favorable: "favorable", limite: "limite", defavorable: "défavorable", inconnu: "inconnue" };
 function ageTxt(ms) {
   const min = Math.round(ms / 60e3);
-  return min < 60 ? `il y a ${min} min` : min < 36 * 60 ? `il y a ${Math.round(min / 60)} h` : `le ${fmtH.format(new Date(Date.now() - ms))}`;
+  if (min < 60) return `il y a ${min} min`;
+  if (min < 6 * 60) return `il y a ${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")}`;
+  return `il y a ${Math.round(min / 60)} h`;
 }
 function heureArome(t = Date.now()) {
   if (!arome) return null;
@@ -241,15 +245,20 @@ function heureArome(t = Date.now()) {
   for (const h of arome.heures) { const d = Math.abs(Date.parse(h.t) - t); if (!best || d < best.d) best = { d, h }; }
   return best && best.d < 3 * 3.6e6 ? best.h : null;
 }
-function texteAir(air) {
-  if (!air || !air.diagnostic || air.diagnostic === "inconnu") return "";
+const NOM_CAPTEUR = { "MTG-FCI": () => "Meteosat", "VIIRS": (a) => `VIIRS ${a.satellite}`, "Sentinel-2": () => "Sentinel-2" };
+const nomSource = (a) => (NOM_CAPTEUR[a.capteur] || (() => `${a.capteur} ${a.satellite}`))(a);
+const fmtJour = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "numeric", month: "short" });
+// « à 16:08 » aujourd'hui, « le dim. 1 nov. à 16:08 » sinon
+const quand = (a) => { const d = new Date(a.date_utc), j = fmtJour.format(d);
+  return `${j === fmtJour.format(new Date()) ? "" : `le ${j} `}à ${fmtHM.format(d)}`; };
+function detailsAir(air) {
   const det = [...(air.raisons || [])];
   if (!det.length) {
     if (air.inversion) det.push(`inversion vers ${nf.format(air.inversion.base_m)}-${nf.format(air.inversion.sommet_m)} m`);
     else if (air.gradient_c_km != null) det.push("air stable");
     if (air.vent850_kmh != null) det.push(`vent faible (${Math.round(air.vent850_kmh)} km/h)`);
   }
-  return `Masse d'air ${AIR[air.diagnostic]}${det.length ? " : " + det.join(", ") : ""} (AROME)`;
+  return det.join(", ");
 }
 // mesures valides consécutives qui finissent par `fin` (même régime), sur AGE_MEDIANE_H heures au plus
 function regime(fin) {
@@ -287,31 +296,47 @@ function etatDeAnalyse(a) {
 
 function renderEtat(e) {
   state.etat = e;
-  const chip = $("hero-chip"), unit = document.querySelector(".hero-value .unit");
-  const avecValeur = e.sommet != null && (e.mode !== "prevision" || (e.air && e.air.diagnostic !== "defavorable"));
-  const srcTxt = (a) => `${a.capteur} · ${a.satellite} · ${fmtH.format(new Date(a.date_utc))}`;
-  $("hero-num").textContent = avecValeur ? nf.format(e.sommet) : "—";
-  $("hero-pm").textContent = avecValeur && e.incert ? `± ${e.incert}` : "";
-  unit.hidden = !avecValeur;
-  state.estimate = avecValeur ? e.sommet : null; state.sigma = avecValeur ? e.incert : null;
-  if (e.mode === "prevision") {
-    const diag = e.air ? e.air.diagnostic : "inconnu";
-    $("hero-label").textContent = "Sommet prévu de la mer de nuages (AROME)";
-    $("hero-src").textContent = e.src ? `Pas d'image récente · dernière : ${srcTxt(e.src)}` : "Aucune image analysée";
-    chip.className = "chip " + (diag === "favorable" ? "good" : diag === "defavorable" ? "info" : "warn");
-    chip.textContent = diag === "favorable" ? "Conditions favorables" : diag === "defavorable" ? "Mer de nuages peu probable" : "Conditions incertaines";
+  const hero = $("hero");
+  const prevision = e.mode === "prevision";
+  const diag = e.air && e.air.diagnostic;
+  const avecValeur = e.sommet != null && (!prevision || diag !== "defavorable");
+  const sit = SIT[e.situation] || SIT.indetermine;
+  // 1. statut
+  let etat, statut, titre = null, detail;
+  if (prevision) {
+    etat = diag === "defavorable" ? "absente" : "prevision";
+    statut = diag === "defavorable" ? "Mer de nuages peu probable" : diag === "favorable" ? "Prévision : mer de nuages probable" : "Prévision : conditions incertaines";
+    if (!avecValeur) titre = "Peu probable";
+    detail = (avecValeur ? "Sommet prévu par AROME · " : "") + (e.src ? `pas d'image satellite récente (dernière ${quand(e.src)})` : "aucune image satellite");
   } else {
-    const sit = SIT[e.situation] || SIT.indetermine;
-    $("hero-label").textContent = e.mode === "mediane" ? `Sommet de la mer de nuages (médiane de ${e.n} mesure${e.n > 1 ? "s" : ""})`
-      : "Sommet de la mer de nuages";
-    $("hero-src").textContent = e.mode === "analyse" ? srcTxt(e.src)
-      : e.mode === "mediane" ? `${e.capteurs.join(", ")} · dernière mesure ${ageTxt(e.age)} (${fmtHM.format(new Date(e.src.date_utc))})`
-      : `${e.src.capteur} · ${e.src.satellite} · ${ageTxt(e.age)} (${fmtHM.format(new Date(e.src.date_utc))})`;
-    chip.className = "chip " + sit.chip; chip.textContent = sit.txt;
+    etat = sit.etat; statut = sit.statut;
+    if (!avecValeur) titre = sit.titre;
+    const age = e.mode === "analyse" ? "" : ` (${ageTxt(e.age)})`;
+    detail = e.mode === "mediane"
+      ? `Médiane de ${e.n} mesures du même épisode · dernière ${quand(e.src)}${age}`
+      : `${avecValeur ? "Sommet mesuré par" : "Image"} ${nomSource(e.src)} ${quand(e.src)}${age}`;
+    if (sit.note) detail = `${sit.note}. ${detail}`;
   }
-  $("hero-air").textContent = texteAir(e.air);
-  const valide = avecValeur && (e.mode === "prevision" ? e.air && e.air.diagnostic !== "defavorable" : SIT[e.situation] && e.situation in { mer: 1, degradee: 1 });
-  appliquerCalques(valide, e.mode !== "prevision" && e.src);
+  hero.dataset.etat = etat;
+  $("hero-statut").textContent = statut;
+  // 2. altitude, ou à défaut un titre explicite (jamais un tiret seul)
+  $("hero-value").hidden = !avecValeur; $("hero-titre").hidden = avecValeur;
+  $("hero-num").textContent = avecValeur ? (prevision ? "≈ " : "") + nf.format(e.sommet) : "";
+  $("hero-pm").textContent = avecValeur && e.incert ? `± ${e.incert} m` : "";
+  $("hero-titre").textContent = titre || "";
+  // 3. source et fraîcheur
+  $("hero-detail").textContent = detail;
+  // 4. masse d'air
+  const air = e.air && diag && diag !== "inconnu";
+  $("hero-air").hidden = !air;
+  if (air) {
+    const b = $("air-badge"); b.className = "air-badge " + diag; b.textContent = `Air ${AIR[diag]}`;
+    const d = detailsAir(e.air); $("air-txt").textContent = d ? `${d} · AROME` : "AROME";
+  }
+  state.estimate = avecValeur ? e.sommet : null; state.sigma = avecValeur ? e.incert : null;
+  const valide = avecValeur && (prevision ? diag !== "defavorable" : e.situation in { mer: 1, degradee: 1 });
+  appliquerCalques(valide, !prevision && e.src);
+  majCases();
   setH(avecValeur ? e.sommet : state.H);
 }
 // Nappe simulée seulement s'il y a une mer de nuages ; sinon on montre le nuage réellement observé.
@@ -322,7 +347,21 @@ function appliquerCalques(valide, avecImage) {
   state.cleCalques = cle;
   $("t-sea").checked = sea.visible = !!valide;
   $("t-obs").checked = obsMesh.visible = !valide && !!avecImage;
-  renderPeaks();
+  renderPeaks(); majCases();
+}
+// « Altitudes mesurées » n'a de sens que si l'image affichée montre une mer de nuages ;
+// les réglages de la nappe ne servent que si la nappe est affichée.
+function majCases() {
+  const cb = $("t-cells"), ok = !!(state.analysis && VALIDE(state.analysis));
+  if (!ok && !cb.disabled) { state.cellsPref = cb.checked; cb.checked = false; }
+  if (ok && cb.disabled) cb.checked = !!state.cellsPref;
+  cb.disabled = !ok;
+  $("lbl-cells").classList.toggle("inactif", !ok);
+  $("lbl-cells").title = ok ? "" : "Pas de mer de nuages sur l'image affichée";
+  updateLabels();
+  const nc = $("nappe-ctrl"), on = $("t-sea").checked;
+  nc.classList.toggle("inactif", !on);
+  nc.querySelectorAll("input, button").forEach((x) => (x.disabled = !on));
 }
 
 // ------------------------------------------------------------------ tableau des analyses
@@ -344,9 +383,20 @@ function renderTable() {
   }
 }
 
+// Infobulle à droite du pointeur, ou à gauche si elle déborderait de l'écran ; toujours dans la fenêtre.
+function placerInfobulle(tip, x, y) {
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight, marge = 8, ecart = 14;
+  let gauche = x + ecart;
+  if (gauche + w > innerWidth - marge) gauche = x - ecart - w;
+  gauche = Math.max(marge, gauche);
+  const haut = Math.min(Math.max(marge, y - 10), innerHeight - h - marge);
+  tip.style.left = `${gauche}px`; tip.style.top = `${haut}px`;
+}
+
 // ------------------------------------------------------------------ graphique (SVG)
 function renderChart() {
-  const W = 344, Hh = 190, m = { l: 40, r: 8, t: 8, b: 22 };
+  const W = 344, Hh = 190, m = { l: 50, r: 8, t: 8, b: 22 };
   const now = Date.now();
   const t0 = now - 48 * 3.6e6, t1 = now + 30 * 3.6e6;
   const recents = hist.analyses.filter((a) => Date.parse(a.date_utc) >= t0);
@@ -363,7 +413,7 @@ function renderChart() {
   const grid = el("g", { class: "grid" }, svg), axis = el("g", { class: "axis" }, svg);
   for (let z = 0; z <= yMax; z += 500) {
     el("line", { x1: m.l, x2: W - m.r, y1: Y(z), y2: Y(z) }, grid);
-    el("text", { x: m.l - 6, y: Y(z) + 3, "text-anchor": "end" }, axis).textContent = nf.format(z);
+    el("text", { x: m.l - 6, y: Y(z) + 3, "text-anchor": "end" }, axis).textContent = `${nf.format(z)} m`;
   }
   // graduations : minuit et midi, heure locale
   for (let t = Math.ceil(t0 / 3.6e6) * 3.6e6; t <= t1; t += 3.6e6) {
@@ -427,7 +477,7 @@ function renderChart() {
       if (VALIDE(o)) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, lab + (situationDe(o) === "degradee" ? " · se dégrade" : ""));
       else row("var(--text-muted)", (SIT[situationDe(o)] || SIT.indetermine).court, lab);
     }
-    tip.hidden = false; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY - 10}px`;
+    placerInfobulle(tip, e.clientX, e.clientY);
   });
   hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });
   $("chart").replaceChildren(svg);
@@ -438,11 +488,11 @@ function renderChart() {
 // ------------------------------------------------------------------ interface
 $("h-slider").addEventListener("input", (e) => setH(Number(e.target.value)));
 $("btn-reset").addEventListener("click", () => state.estimate != null && setH(state.estimate));
-$("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; renderPeaks(); });
+$("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; renderPeaks(); majCases(); });
 $("t-obs").addEventListener("change", (e) => (obsMesh.visible = e.target.checked));
 $("t-cells").addEventListener("change", () => updateLabels());
 $("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); });
-const afficherMaj = () => { $("maj").textContent = `Mise à jour : ${fmtH.format(new Date(hist.maj_utc))}`; };
+const afficherMaj = () => { $("maj").textContent = `mis à jour ${fmtH.format(new Date(hist.maj_utc))}`; };
 afficherMaj();
 
 function resize() {
