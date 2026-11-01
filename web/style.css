@@ -151,11 +151,14 @@ input[type=range] { width: 100%; margin: 8px 0 4px; accent-color: var(--series-1
 #tooltip {
   position: fixed; z-index: 10; pointer-events: none; font-size: 12px; line-height: 1.4;
   background: var(--surface-1, #fff); color: var(--text-primary, #111); border: 1px solid var(--border, #ddd);
-  border-radius: 6px; padding: 6px 8px; box-shadow: 0 2px 8px #0002; min-width: 120px;
+  border-radius: 6px; padding: 6px 8px; box-shadow: 0 2px 8px #0002; min-width: 120px; max-width: 260px;
 }
+#tooltip > div:first-child { white-space: nowrap; font-weight: 600; margin-bottom: 2px; }
 #tooltip strong { font-variant-numeric: tabular-nums; }
-#tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
-#tooltip .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+#tooltip .tt-row { display: flex; align-items: baseline; gap: 6px; }
+#tooltip .tt-row strong { white-space: nowrap; }
+#tooltip .tt-row span:last-child { color: var(--text-secondary, #555); }
+#tooltip .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; align-self: center; }
 
 .peaks { list-style: none; margin: 0; padding: 0; font-size: 13px; }
 .peaks li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }

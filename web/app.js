@@ -383,6 +383,17 @@ function renderTable() {
   }
 }
 
+// Infobulle à droite du pointeur, ou à gauche si elle déborderait de l'écran ; toujours dans la fenêtre.
+function placerInfobulle(tip, x, y) {
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight, marge = 8, ecart = 14;
+  let gauche = x + ecart;
+  if (gauche + w > innerWidth - marge) gauche = x - ecart - w;
+  gauche = Math.max(marge, gauche);
+  const haut = Math.min(Math.max(marge, y - 10), innerHeight - h - marge);
+  tip.style.left = `${gauche}px`; tip.style.top = `${haut}px`;
+}
+
 // ------------------------------------------------------------------ graphique (SVG)
 function renderChart() {
   const W = 344, Hh = 190, m = { l: 50, r: 8, t: 8, b: 22 };
@@ -466,7 +477,7 @@ function renderChart() {
       if (VALIDE(o)) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, lab + (situationDe(o) === "degradee" ? " · se dégrade" : ""));
       else row("var(--text-muted)", (SIT[situationDe(o)] || SIT.indetermine).court, lab);
     }
-    tip.hidden = false; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY - 10}px`;
+    placerInfobulle(tip, e.clientX, e.clientY);
   });
   hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });
   $("chart").replaceChildren(svg);
