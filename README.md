@@ -48,7 +48,10 @@ ce qui va dans le sens d'une sous-estimation par VIIRS.
 - Filtre « contact nappe » (`voisin_couvert`) : un pixel de bord doit toucher, à moins de 1 200 m, un pixel entièrement
   couvert. Sans lui, des pentes rocheuses éclairées de Belledonne créaient un second pic d'altitudes vers 2 200 m,
   qui comptait plus de pixels que le vrai bord.
-- Pas encore évalué : soleil bas (matin, fin d'après-midi), autres journées.
+- Journée complète (`pipeline.py mtg 2026-10-31`, une image toutes les 30 min) : nappe détectée sur les 15 images de 8 h 08 à 15 h 08 UTC.
+  Le sommet reste entre 1 198 et 1 332 m de 8 h 38 à 14 h 38. Les deux images à soleil bas s'écartent : 8 h 08 → 1 150 m,
+  15 h 08 → 1 062 m. À confirmer : erreur de mesure ou vraie évolution de la nappe ?
+- Pas encore évalué : autres journées.
 
 ```bash
 python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte
