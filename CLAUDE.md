@@ -5,3 +5,6 @@
   puis vérifier que l'exécution se termine avec succès. Le workflow ne se déclenche pas sur un push.
 - Le bot du workflow pousse des commits « Données … » sur `main` : récupérer `origin/main` avant de fusionner.
 - Le site publié est https://riderfou.github.io/cloud9/ (source GitHub Pages : GitHub Actions).
+- Fusionner sans changer de branche ni `reset --hard` (qui efface les modifications non commitées) :
+  tout commiter, puis `git fetch origin main && git merge origin/main && git push origin HEAD:main`.
+- Ne pas pousser sur `main` pendant qu'une exécution du workflow est en cours (son push serait refusé).
