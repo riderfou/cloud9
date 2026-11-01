@@ -45,7 +45,7 @@ body { display: flex; background: #9cc3e6; }
   background: linear-gradient(#5d8fc7 0%, #a9cbea 55%, #dfe9f1 100%);
 }
 #scene canvas { display: block; }
-#labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+#labels { position: absolute; inset: 0; z-index: 0;   /* contexte propre : les z-index des étiquettes ne dépassent pas */ pointer-events: none; overflow: hidden; }
 #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; text-shadow: 0 1px 3px #0006; }
 #hint { position: absolute; left: 12px; right: 64px; bottom: 10px; font-size: 12px; color: #fff; text-shadow: 0 1px 2px #0008; }
 #hint .tactile { display: none; }
