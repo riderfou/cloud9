@@ -81,6 +81,16 @@ la nappe montant de 1 330 à 1 556 m. Au matin, le visible prend le relais à 1 
 Météo-France donnent une fourchette, l'infrarouge y tombe (exemple à 2 h : Col de Porte, 1 325 m, est saturé ;
 Saint-Hilaire, 1 756 m, est sec et plus doux ; l'infrarouge donne 1 495 m). AROME sous-estime la nappe d'environ 500 m cette nuit-là.
 
+## Neige (`neige.py`)
+
+Le fond de carte est l'image Sentinel-2 du 22/07/2026 (sans nuages, sans neige saisonnière). La neige du moment vient
+des images Meteosat MTG de jour : neige = brillante dans le visible (0,6 µm) et sombre à 2,2 µm (indice NDSI > 0,4) ;
+nuage d'eau = brillant dans les deux, laissé inconnu. La fraction enneigée d'un pixel de 500 m est posée sur la partie la
+plus haute du relief qu'il couvre. Composite `web/data/neige.png` : dernière observation sans nuage de chaque point, images
+à ± 2 h 30 du midi solaire, maximum du jour. 31/10-01/11/2026 : environ 50-65 km² enneigés (glaciers des Grandes Rousses et
+des Écrins), limite d'enneigement vers 3 100-3 400 m. Piste : la fraction enneigée Sentinel-2 à 20 m de Theia (LIS FSC)
+comme base, mise à jour par Meteosat entre deux passages.
+
 ## Situation : mer de nuages ou pas ? (`situation.py`)
 
 Une image où l'on trouve des « bords » de nuage n'est pas forcément une mer de nuages. Deux diagnostics indépendants :
