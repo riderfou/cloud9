@@ -10,11 +10,12 @@ const nf = new Intl.NumberFormat("fr-FR");
 
 const state = { H: 1200, exag: 1, estimate: null, sigma: null, analysis: null };
 
-async function getJSON(p) { const r = await fetch(p); if (!r.ok) throw new Error(p); return r.json(); }
+// "no-cache" : le navigateur revalide auprès du serveur (GitHub Pages met les fichiers en cache 10 min)
+async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(p); return r.json(); }
 function loadImage(src) { return new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = src; }); }
 
 // ------------------------------------------------------------------ données
-const [meta, hist, arome, lieux, reliefImg] = await Promise.all([
+let [meta, hist, arome, lieux, reliefImg] = await Promise.all([
   getJSON("data/meta.json"), getJSON("data/historique.json"), getJSON("data/arome.json").catch(() => null),
   getJSON("data/sommets.json"), loadImage("data/relief.png"),
 ]);
@@ -195,7 +196,7 @@ function updateLabels() {
 // ------------------------------------------------------------------ analyse affichée
 async function showAnalysis(id, synthese = false) {
   const a = await getJSON(`data/analyses/${id}.json`);
-  state.analysis = a;
+  state.analysis = a; state.synthese = synthese;
   const img = await loadImage(`data/${a.masque}`);
   const t = new THREE.Texture(img); t.needsUpdate = true; t.flipY = true;
   if (obsMat.alphaMap) obsMat.alphaMap.dispose();
@@ -361,7 +362,8 @@ $("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; r
 $("t-obs").addEventListener("change", (e) => (obsMesh.visible = e.target.checked));
 $("t-cells").addEventListener("change", () => updateLabels());
 $("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); });
-$("maj").textContent = `Mise à jour : ${fmtH.format(new Date(hist.maj_utc))}`;
+const afficherMaj = () => { $("maj").textContent = `Mise à jour : ${fmtH.format(new Date(hist.maj_utc))}`; };
+afficherMaj();
 
 function resize() {
   const w = host.clientWidth, h = host.clientHeight;
@@ -373,6 +375,37 @@ renderTable(); renderChart();
 const startId = hist.derniere_detection || hist.derniere_analyse;
 if (startId) await showAnalysis(startId, true); else renderHero(null);
 $("loading").remove();
+
+// ------------------------------------------------------------------ rafraîchissement automatique
+// Recharge les données toutes les 10 min et au retour sur l'onglet (page laissée ouverte, téléphone en veille...).
+// Si l'utilisateur a choisi une analyse dans le tableau, elle reste affichée ; sinon on passe à la nouvelle synthèse.
+const RAFRAICHIR_MS = 10 * 60e3;
+let dernierControle = Date.now(), enCours = false;
+async function rafraichir() {
+  if (enCours) return;
+  enCours = true; dernierControle = Date.now();
+  try {
+    const h = await getJSON("data/historique.json");
+    if (h.maj_utc !== hist.maj_utc) {
+      hist = h;
+      arome = await getJSON("data/arome.json").catch(() => arome);
+      afficherMaj(); renderTable();
+      const id = hist.derniere_detection || hist.derniere_analyse;
+      if (state.synthese && id) await showAnalysis(id, true);
+      else if (state.analysis) {
+        document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === state.analysis.id));
+        renderHero(state.analysis);
+      }
+    }
+    renderChart();   // le repère « maintenant » avance même sans nouvelles données
+  } catch (e) {
+    console.warn("rafraîchissement impossible", e);   // hors ligne... : on réessaiera au prochain tour
+  } finally { enCours = false; }
+}
+setInterval(rafraichir, RAFRAICHIR_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - dernierControle > 60e3) rafraichir();
+});
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
