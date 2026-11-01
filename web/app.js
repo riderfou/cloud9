@@ -19,6 +19,7 @@ let [meta, hist, arome, lieux, reliefImg] = await Promise.all([
   getJSON("data/meta.json"), getJSON("data/historique.json"), getJSON("data/arome.json").catch(() => null),
   getJSON("data/sommets.json"), loadImage("data/relief.png"),
 ]);
+const webcams = await getJSON("data/webcams.json").then((d) => d.webcams || []).catch(() => []);
 const [GW, GH] = meta.grille_web;
 const [X0, Y0, X1, Y1] = meta.aoi;
 const step = meta.pas_m;
@@ -159,12 +160,57 @@ function statusOf(alt) {
   return alt > state.H + tol ? "dessus" : alt < state.H - tol ? "dessous" : "bord";
 }
 const ST_TXT = { dessus: "au-dessus", bord: "au niveau du bord", dessous: "dans / sous la mer" };
+// ------------------------------------------------------------------ webcams (Windy)
+const ICONE_CAM = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+const camLabels = webcams.map((c) => {
+  const L = addLabel(ICONE_CAM, "cam", c.x, c.y, c.alt_mnt);
+  L.el.title = `${c.titre} · ${nf.format(c.alt_mnt)} m`;
+  L.el.setAttribute("role", "button"); L.el.tabIndex = 0;
+  L.el.addEventListener("click", () => ouvrirWebcam(c));
+  L.el.addEventListener("keydown", (e) => { if (e.key === "Enter") ouvrirWebcam(c); });
+  return { c, L };
+});
+function renderWebcams() {
+  const sec = $("webcams-section"); sec.hidden = !webcams.length;
+  $("t-cams").closest("label").hidden = !webcams.length;
+  for (const { c, L } of camLabels) {
+    const st = statusOf(c.alt_mnt);
+    L.el.className = "lbl cam " + (!sea.visible ? "" : st);
+  }
+  const ul = $("cams"); ul.replaceChildren();
+  for (const c of webcams) {
+    const li = document.createElement("li"), st = statusOf(c.alt_mnt);
+    const b = document.createElement("button"); b.type = "button"; b.className = "lien-cam"; b.textContent = c.titre;
+    b.addEventListener("click", () => ouvrirWebcam(c));
+    const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(c.alt_mnt)} m`;
+    li.append(b, alt);
+    if (sea.visible) { const chip = document.createElement("span"); chip.className = "st " + st;
+      chip.textContent = (st === "dessus" ? "☀ " : st === "bord" ? "≈ " : "☁ ") + ST_TXT[st]; li.appendChild(chip); }
+    ul.appendChild(li);
+  }
+}
+function ouvrirWebcam(c) {
+  const d = $("cam-dialog");
+  $("cam-titre").textContent = c.titre;
+  const st = statusOf(c.alt_mnt);
+  $("cam-info").textContent = `${nf.format(c.alt_mnt)} m${c.ville ? ` · ${c.ville}` : ""}`
+    + (sea.visible ? ` · ${ST_TXT[st]} de la nappe affichée (${nf.format(state.H)} m)` : "");
+  const f = $("cam-player");
+  if (c.lecteur) { f.src = c.lecteur; f.hidden = false; } else { f.removeAttribute("src"); f.hidden = true; }
+  const a = $("cam-lien"); a.href = c.lien || "https://www.windy.com/webcams"; 
+  d.showModal();
+}
+$("cam-dialog").addEventListener("close", () => { $("cam-player").removeAttribute("src"); });
+$("cam-fermer").addEventListener("click", () => $("cam-dialog").close());
+$("cam-dialog").addEventListener("click", (e) => { if (e.target === $("cam-dialog")) $("cam-dialog").close(); });
+
 function renderPeaks() {
   for (const { s, L } of peakLabels) {
     const st = statusOf(s.alt);
     L.el.className = "lbl " + (!sea.visible ? "" : st === "dessous" ? "dessous" : st === "bord" ? "bord" : "");
     L.el.innerHTML = `${s.nom} <small>${nf.format(s.alt)} m</small>`;
   }
+  renderWebcams();
   const ul = $("peaks"); ul.replaceChildren();
   $("peaks-note").hidden = sea.visible;
   for (const s of [...lieux].sort((a, b) => b.alt - a.alt)) {
@@ -187,11 +233,11 @@ function setCells(mailles) {
 const v = new THREE.Vector3();
 function updateLabels() {
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
-  const showPeaks = $("t-labels").checked, showCells = $("t-cells").checked;
+  const showPeaks = $("t-labels").checked, showCells = $("t-cells").checked, showCams = $("t-cams").checked;
   for (const L of labels) {
-    const isCell = L.cls === "cell";
-    if ((isCell && !showCells) || (!isCell && !showPeaks)) { L.el.style.display = "none"; continue; }
-    v.copy(toWorld(L.x, L.y, isCell ? L.z : zAt(L.x, L.y) + 30)).project(camera);
+    const isCell = L.cls === "cell", isCam = L.cls.startsWith("cam");
+    if ((isCell && !showCells) || (isCam && !showCams) || (!isCell && !isCam && !showPeaks)) { L.el.style.display = "none"; continue; }
+    v.copy(toWorld(L.x, L.y, isCell ? L.z : zAt(L.x, L.y) + (isCam ? 0 : 30))).project(camera);
     if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) { L.el.style.display = "none"; continue; }
     L.el.style.display = ""; L.el.style.left = `${(v.x * .5 + .5) * w}px`; L.el.style.top = `${(-v.y * .5 + .5) * h}px`;
   }
@@ -491,6 +537,7 @@ $("btn-reset").addEventListener("click", () => state.estimate != null && setH(st
 $("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; renderPeaks(); majCases(); });
 $("t-obs").addEventListener("change", (e) => (obsMesh.visible = e.target.checked));
 $("t-cells").addEventListener("change", () => updateLabels());
+$("t-cams").addEventListener("change", () => updateLabels());
 $("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); });
 const afficherMaj = () => { $("maj").textContent = `mis à jour ${fmtH.format(new Date(hist.maj_utc))}`; };
 afficherMaj();

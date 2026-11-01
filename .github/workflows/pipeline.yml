@@ -39,6 +39,7 @@ jobs:
         env:
           EUMETSAT_CONSUMER_KEY: ${{ secrets.EUMETSAT_CONSUMER_KEY }}
           EUMETSAT_CONSUMER_SECRET: ${{ secrets.EUMETSAT_CONSUMER_SECRET }}
+          WINDY_WEBCAMS_API_KEY: ${{ secrets.WINDY_WEBCAMS_API_KEY }}
         run: |
           [ -f web/data/relief.png ] || python3 pipeline.py statique
           H=$(date -u +%H)
@@ -50,6 +51,7 @@ jobs:
             python3 pipeline.py s2 5 || true
           fi
           python3 pipeline.py arome || true
+          python3 -c "import pipeline; pipeline.run_webcams()" || true
           python3 pipeline.py index
       - name: Commit des données
         run: |
