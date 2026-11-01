@@ -162,34 +162,45 @@ function statusOf(alt) {
 const ST_TXT = { dessus: "au-dessus", bord: "au niveau du bord", dessous: "dans / sous la mer" };
 // ------------------------------------------------------------------ webcams (Windy)
 const ICONE_CAM = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
-const camLabels = webcams.map((c) => {
-  const L = addLabel(ICONE_CAM, "cam", c.x, c.y, c.alt_mnt);
-  L.el.title = `${c.titre} · ${nf.format(c.alt_mnt)} m`;
+// webcams au même endroit (< 150 m) : une seule pastille, avec leur nombre
+const groupesCam = [];
+for (const c of webcams) {
+  const g = groupesCam.find((g) => Math.hypot(g.x - c.x, g.y - c.y) < 150);
+  if (g) g.cams.push(c); else groupesCam.push({ x: c.x, y: c.y, alt: c.alt_mnt, cams: [c] });
+}
+const camLabels = groupesCam.map((g) => {
+  const n = g.cams.length;
+  const L = addLabel(ICONE_CAM + (n > 1 ? `<span class="nb">${n}</span>` : ""), "cam", g.x, g.y, g.alt);
+  L.el.title = n > 1 ? `${n} webcams · ${g.cams[0].ville || g.cams[0].titre} · ${nf.format(g.alt)} m` : `${g.cams[0].titre} · ${nf.format(g.alt)} m`;
   L.el.setAttribute("role", "button"); L.el.tabIndex = 0;
-  L.el.addEventListener("click", () => ouvrirWebcam(c));
-  L.el.addEventListener("keydown", (e) => { if (e.key === "Enter") ouvrirWebcam(c); });
-  return { c, L };
+  L.el.addEventListener("click", () => ouvrirWebcam(g.cams[0], g.cams));
+  L.el.addEventListener("keydown", (e) => { if (e.key === "Enter") ouvrirWebcam(g.cams[0], g.cams); });
+  return { g, L };
 });
+const CAMS_REPLIEES = 8;
+let camsDepliees = false;
 function renderWebcams() {
   const sec = $("webcams-section"); sec.hidden = !webcams.length;
   $("t-cams").closest("label").hidden = !webcams.length;
-  for (const { c, L } of camLabels) {
-    const st = statusOf(c.alt_mnt);
-    L.el.className = "lbl cam " + (!sea.visible ? "" : st);
-  }
+  for (const { g, L } of camLabels) L.el.className = "lbl cam " + (!sea.visible ? "" : statusOf(g.alt));
   const ul = $("cams"); ul.replaceChildren();
-  for (const c of webcams) {
+  webcams.forEach((c, k) => {
+    if (!camsDepliees && k >= CAMS_REPLIEES) return;
     const li = document.createElement("li"), st = statusOf(c.alt_mnt);
     const b = document.createElement("button"); b.type = "button"; b.className = "lien-cam"; b.textContent = c.titre;
-    b.addEventListener("click", () => ouvrirWebcam(c));
+    b.addEventListener("click", () => ouvrirWebcam(c, (groupesCam.find((g) => g.cams.includes(c)) || { cams: [c] }).cams));
     const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(c.alt_mnt)} m`;
     li.append(b, alt);
     if (sea.visible) { const chip = document.createElement("span"); chip.className = "st " + st;
       chip.textContent = (st === "dessus" ? "☀ " : st === "bord" ? "≈ " : "☁ ") + ST_TXT[st]; li.appendChild(chip); }
     ul.appendChild(li);
-  }
+  });
+  const plus = $("cams-plus");
+  plus.hidden = webcams.length <= CAMS_REPLIEES;
+  plus.textContent = camsDepliees ? "Afficher moins" : `Afficher les ${webcams.length} webcams`;
 }
-function ouvrirWebcam(c) {
+$("cams-plus").addEventListener("click", () => { camsDepliees = !camsDepliees; renderWebcams(); });
+function ouvrirWebcam(c, groupe = [c]) {
   const d = $("cam-dialog");
   $("cam-titre").textContent = c.titre;
   const st = statusOf(c.alt_mnt);
@@ -197,8 +208,16 @@ function ouvrirWebcam(c) {
     + (sea.visible ? ` · ${ST_TXT[st]} de la nappe affichée (${nf.format(state.H)} m)` : "");
   const f = $("cam-player");
   if (c.lecteur) { f.src = c.lecteur; f.hidden = false; } else { f.removeAttribute("src"); f.hidden = true; }
-  const a = $("cam-lien"); a.href = c.lien || "https://www.windy.com/webcams"; 
-  d.showModal();
+  $("cam-lien").href = c.lien || "https://www.windy.com/webcams";
+  // autres webcams au même endroit
+  const nav = $("cam-groupe"); nav.replaceChildren(); nav.hidden = groupe.length < 2;
+  for (const o of groupe) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = o.titre.replace(/^[^:›]+[:›]\s*/, "") || o.titre;
+    b.setAttribute("aria-pressed", String(o === c));
+    b.addEventListener("click", () => ouvrirWebcam(o, groupe));
+    nav.appendChild(b);
+  }
+  if (!d.open) d.showModal();
 }
 $("cam-dialog").addEventListener("close", () => { $("cam-player").removeAttribute("src"); });
 $("cam-fermer").addEventListener("click", () => $("cam-dialog").close());

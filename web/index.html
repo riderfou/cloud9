@@ -102,6 +102,7 @@
   <section id="webcams-section" hidden>
     <h2>Webcams</h2>
     <ul id="cams" class="peaks"></ul>
+    <button id="cams-plus" type="button" class="bouton-texte" hidden></button>
     <p class="note">Webcams fournies par <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">Windy.com</a>. Altitude lue sur le relief à la position déclarée de la webcam.</p>
   </section>
 
@@ -133,6 +134,7 @@
     <div><h3 id="cam-titre"></h3><p id="cam-info"></p></div>
     <button id="cam-fermer" type="button" aria-label="Fermer">✕</button>
   </div>
+  <div id="cam-groupe" class="cam-groupe" hidden></div>
   <iframe id="cam-player" title="Lecteur de la webcam" loading="lazy" allowfullscreen></iframe>
   <p class="cam-pied"><a id="cam-lien" target="_blank" rel="noopener">Voir sur Windy.com</a> · Webcams fournies par Windy.com</p>
 </dialog>
