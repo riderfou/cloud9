@@ -87,31 +87,48 @@ def vers_grille(v, f, z, parallaxe, max_dist=1200.0):
     return out.reshape(z.shape)
 
 
+# Source de chaque point, dans le canal alpha de neige.png (valeurs proches de 255 : sans effet à l'affichage)
+SOURCES = {"lis": 255, "mtg": 254, None: 253}
+
+
 def charger(dossier):
+    """Composite : fraction (0..1), heure d'observation (heures depuis REF, 0 = jamais), source (code alpha)."""
     p = os.path.join(dossier, "neige.png")
     if not os.path.exists(p):
-        return None, None
-    a = np.asarray(Image.open(p).convert("RGB")).astype(np.int32)
-    return a[..., 0] / 255.0, a[..., 1] * 256 + a[..., 2]
+        return None, None, None
+    im = Image.open(p)
+    a = np.asarray(im.convert("RGBA")).astype(np.int32)
+    src = a[..., 3] if im.mode == "RGBA" else np.where(a[..., 1] * 256 + a[..., 2] > 0, SOURCES["mtg"], SOURCES[None])
+    return a[..., 0] / 255.0, a[..., 1] * 256 + a[..., 2], src
 
 
-def mettre_a_jour(dossier, grille, quand, z, image_id=None):
-    """Fusionne une observation (grille 0..1 / NaN) dans le composite. Renvoie les statistiques publiées."""
-    frac, heure = charger(dossier)
+def mettre_a_jour(dossier, grille, quand, z, image_id=None, source="mtg"):
+    """Fusionne une observation (grille 0..1 / NaN) dans le composite. Renvoie les statistiques publiées.
+    Règles, point par point : jour plus récent -> remplace ; jour plus ancien -> ignoré ; même jour (UTC) ->
+    Sentinel-2 / LIS (20 m) l'emporte sur Meteosat (500 m), et entre deux images Meteosat on garde le maximum."""
+    frac, heure, src = charger(dossier)
     h = int((quand - REF).total_seconds() // 3600)
+    code = SOURCES[source]
     if frac is None or frac.shape != grille.shape:
-        frac = np.zeros(grille.shape); heure = np.zeros(grille.shape, np.int32)
+        frac = np.zeros(grille.shape); heure = np.zeros(grille.shape, np.int32); src = np.full(grille.shape, SOURCES[None])
+    if source == "mtg":      # léger lissage de la seule observation Meteosat (pixels isolés)
+        g = ndimage.median_filter(np.nan_to_num(grille, nan=-1), size=3)
+        grille = np.where(np.isfinite(grille), np.clip(g, 0, 1), np.nan)
     vu = np.isfinite(grille)
-    # même jour (UTC) : maximum ; jour plus récent : remplacement ; jour plus ancien (rattrapage) : ignoré
-    meme_jour = vu & ((heure // 24) == (h // 24))
-    plus_recent = vu & ((heure // 24) < (h // 24))
-    nouv = np.where(meme_jour, np.maximum(frac, grille), np.where(plus_recent, grille, frac))
-    heure = np.where(meme_jour, np.maximum(heure, h), np.where(plus_recent, h, heure))
-    # léger lissage des bords (pixels isolés)
-    nouv = ndimage.median_filter(nouv, size=3)
+    meme_jour = vu & ((heure // 24) == (h // 24)) & (heure > 0)
+    plus_recent = vu & (((heure // 24) < (h // 24)) | (heure == 0))
+    if source == "lis":
+        remplace = plus_recent | meme_jour
+        maxi = np.zeros_like(vu)
+    else:
+        remplace = plus_recent | (meme_jour & (src == SOURCES[None]))
+        maxi = meme_jour & (src == SOURCES["mtg"])
+    nouv = np.where(remplace, grille, np.where(maxi, np.maximum(frac, np.nan_to_num(grille)), frac))
+    heure = np.where(remplace, h, np.where(maxi, np.maximum(heure, h), heure))
+    src = np.where(remplace | maxi, code, src)
     r = np.clip(np.round(nouv * 255), 0, 255).astype(np.uint8)
     g, b = (heure // 256).astype(np.uint8), (heure % 256).astype(np.uint8)
-    Image.fromarray(np.dstack([r, g, b]), "RGB").save(os.path.join(dossier, "neige.png"), optimize=True)
+    Image.fromarray(np.dstack([r, g, b, src.astype(np.uint8)]), "RGBA").save(os.path.join(dossier, "neige.png"), optimize=True)
     # statistiques : surface enneigée, limite d'enneigement (altitude où la moitié du terrain est enneigée)
     connu = heure > 0
     alt_limite = None
@@ -123,8 +140,9 @@ def mettre_a_jour(dossier, grille, quand, z, image_id=None):
         alt_limite = int(min(au_dessus)) if au_dessus else None
     j = os.path.join(dossier, "neige.json")
     meta = json.load(open(j)) if os.path.exists(j) else {}
-    images = (meta.get("images") or [])[-23:] + [{"id": image_id, "date_utc": quand.isoformat(), "vu": round(float(vu.mean()), 3)}]
-    meta.update({"source": "Meteosat MTG-FCI (visible 0,6 µm et 2,2 µm), composite des dernières observations sans nuage",
+    images = (meta.get("images") or [])[-23:] + [{"id": image_id, "source": source, "date_utc": quand.isoformat(), "vu": round(float(vu.mean()), 3)}]
+    meta.update({"source": "Sentinel-2 Theia LIS (fraction enneigée 20 m) et Meteosat MTG-FCI (visible 0,6 / 2,2 µm), composite des dernières observations sans nuage",
+                 "part_lis": round(float((src == SOURCES["lis"]).mean()), 3),
                  "maj_utc": quand.isoformat(), "ref_heures": REF.isoformat(), "images": images,
                  "surface_enneigee_km2": round(float((nouv > 0.5).sum() * (z.size and ((m2n.AOI[2] - m2n.AOI[0]) / z.shape[1]) ** 2) / 1e6), 1),
                  "part_observee": round(float(connu.mean()), 3), "limite_enneigement_m": alt_limite})

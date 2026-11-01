@@ -275,6 +275,84 @@ def run_mtg(debut=None, fin=None, pas_min=30, max_images=16, heures=6):
                 print(f"  neige : échec ({e})")
 
 
+# ------------------------------------------------------------------ neige Sentinel-2 (Theia LIS)
+def _lire_fsc(tif):
+    """Fraction enneigée LIS (0-100 %, 205 nuage, 255 sans donnée) moyennée sur la grille web (100 m) : 0..1 / NaN."""
+    import rasterio
+    from rasterio.warp import reproject, Resampling
+    from rasterio.transform import from_origin
+    with rasterio.open(tif) as s:
+        a = s.read(1).astype("float32")
+        a[(a > 100)] = np.nan
+        out = np.full((GH, GW), np.nan, "float32")
+        reproject(a, out, src_transform=s.transform, src_crs=s.crs, src_nodata=np.nan,
+                  dst_transform=from_origin(m2n.AOI[0], m2n.AOI[3], m2n.RES * STEP, m2n.RES * STEP), dst_crs=m2n.CRS,
+                  dst_nodata=np.nan, resampling=Resampling.average)
+    return out / 100.0
+
+
+def run_lis(jours=10, intervalle_h=6, forcer=False):
+    """Fraction enneigée Sentinel-2 à 20 m (Theia LIS FSC, collection LIS_FSC_PREOP sur hydroweb.next), fusionnée
+    dans le composite de neige. Requête au plus toutes les `intervalle_h` heures, sur la zone et les derniers jours."""
+    import zipfile, tempfile
+    if not os.environ.get("HYDROWEB_API_KEY"):
+        print("LIS : HYDROWEB_API_KEY absente, étape ignorée"); return
+    import py_hydroweb
+    jn = os.path.join(OUT, "neige.json")
+    meta = json.load(open(jn)) if os.path.exists(jn) else {}
+    maintenant = dt.datetime.now(dt.timezone.utc)
+    if not forcer and meta.get("lis_verifie_utc") and maintenant - dt.datetime.fromisoformat(meta["lis_verifie_utc"]) < dt.timedelta(hours=intervalle_h):
+        print("LIS : vérifié récemment, étape ignorée"); return
+    deja = set(meta.get("lis_produits", []))
+    lo, la = wtransform(m2n.CRS, "EPSG:4326", [m2n.AOI[0], m2n.AOI[2], m2n.AOI[0], m2n.AOI[2]], [m2n.AOI[1], m2n.AOI[1], m2n.AOI[3], m2n.AOI[3]])
+    bbox = [round(min(lo), 4), round(min(la), 4), round(max(lo), 4), round(max(la), 4)]
+    debut = maintenant - dt.timedelta(days=jours)
+    client = py_hydroweb.Client("https://hydroweb.next.theia-land.fr/api")
+    panier = py_hydroweb.DownloadBasket(f"mer2nuages_lis_{maintenant:%Y%m%dT%H%M}")
+    panier.add_collection(collection_id="LIS_FSC_PREOP", bbox=bbox,
+                          datetime=f"{debut:%Y-%m-%dT00:00:00Z}/{maintenant:%Y-%m-%dT%H:%M:%SZ}")
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            zp = client.submit_and_download_zip(panier, zip_filename="lis.zip", output_folder=tmp)
+        except Exception as e:
+            print(f"LIS : échec de la requête ({type(e).__name__}: {str(e)[:300]})"); return
+        with zipfile.ZipFile(zp) as z:
+            noms = z.namelist()
+            print(f"LIS : archive {os.path.getsize(zp) // 1_000_000} Mo, {len(noms)} fichiers ; exemples :", noms[:12])
+            z.extractall(tmp)
+        tifs = [os.path.join(tmp, n) for n in noms if n.lower().endswith((".tif", ".tiff"))]
+        # fraction « au sol » (corrigée de la forêt) si elle existe, sinon « vue du dessus »
+        fsc = [t for t in tifs if "FSCOG" in os.path.basename(t).upper()] or [t for t in tifs if "FSCTOC" in os.path.basename(t).upper()] \
+              or [t for t in tifs if "FSC" in os.path.basename(t).upper()]
+        print(f"LIS : {len(tifs)} GeoTIFF, {len(fsc)} de fraction enneigée")
+        produits = []
+        for t in fsc:
+            nom = os.path.basename(t)
+            m = re.search(r"(20\d{6})T?(\d{6})?", nom)
+            if not m:
+                print("  LIS : date introuvable dans", nom); continue
+            quand = dt.datetime.strptime(m.group(1) + (m.group(2) or "103000"), "%Y%m%d%H%M%S").replace(tzinfo=dt.timezone.utc)
+            produits.append((quand, nom, t))
+        relief = relief_web()
+        for quand, nom, t in sorted(produits):
+            if nom in deja:
+                continue
+            try:
+                g = _lire_fsc(t)
+            except Exception as e:
+                print(f"  LIS : {nom} illisible ({e})"); continue
+            if np.isfinite(g).sum() < 100:
+                deja.add(nom); continue           # tuile hors zone ou entièrement nuageuse
+            n = neige.mettre_a_jour(OUT, g, quand, relief, nom, source="lis")
+            deja.add(nom)
+            print(f"  LIS {quand:%d/%m %H:%M} {nom} : {np.isfinite(g).mean():.0%} de la zone vue, "
+                  f"{np.nanmean(g > 0.5):.1%} enneigé ; composite {n['surface_enneigee_km2']} km², limite ~{n['limite_enneigement_m']} m")
+    meta = json.load(open(jn)) if os.path.exists(jn) else {}
+    meta["lis_verifie_utc"] = maintenant.isoformat(timespec="minutes")
+    meta["lis_produits"] = sorted(deja)[-200:]
+    write_json("neige.json", meta)
+
+
 # ------------------------------------------------------------------ observations Météo-France
 MF = "https://public-api.meteofrance.fr/public"
 
@@ -624,6 +702,7 @@ if __name__ == "__main__":
     elif cmd == "webcams": run_webcams(age_max_h=0)
     elif cmd == "webcams-corrections": run_webcams(age_max_h=10 ** 6)   # réapplique les corrections sans requête
     elif cmd == "obs": run_obs_mf()
+    elif cmd == "lis": run_lis(forcer="--forcer" in sys.argv)
     elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
         reclasser()
         a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)

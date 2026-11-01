@@ -11,3 +11,4 @@ satpy
 pyorbital
 netCDF4
 h5netcdf
+py-hydroweb
