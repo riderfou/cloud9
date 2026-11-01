@@ -193,7 +193,7 @@ function updateLabels() {
 }
 
 // ------------------------------------------------------------------ analyse affichée
-async function showAnalysis(id) {
+async function showAnalysis(id, synthese = false) {
   const a = await getJSON(`data/analyses/${id}.json`);
   state.analysis = a;
   const img = await loadImage(`data/${a.masque}`);
@@ -202,22 +202,47 @@ async function showAnalysis(id) {
   obsMat.alphaMap = t; obsMat.needsUpdate = true;
   setCells(a.detectee ? a.mailles : []);
   document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
-  renderHero(a);
+  renderHero(a, synthese ? syntheseRecente() : null);
 }
 
-function renderHero(a) {
+// Médiane des détections des FENETRE_H heures qui précèdent la dernière détection (tous capteurs) :
+// une image isolée (soleil bas, bord de nappe fragmenté...) ne fait pas basculer la valeur affichée.
+const FENETRE_H = 3;
+const fmtHM = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" });
+const mediane = (xs) => { const s = [...xs].sort((p, q) => p - q), k = s.length >> 1; return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2; };
+function syntheseRecente() {
+  const det = hist.analyses.filter((a) => a.detectee && a.sommet_m != null);
+  if (!det.length) return null;
+  const t1 = Math.max(...det.map((a) => Date.parse(a.date_utc)));
+  const sel = det.filter((a) => Date.parse(a.date_utc) > t1 - FENETRE_H * 3.6e6);
+  return {
+    sommet_m: Math.round(mediane(sel.map((a) => a.sommet_m))),
+    incertitude_m: Math.round(mediane(sel.map((a) => a.incertitude_m))),
+    n: sel.length, t0: Math.min(...sel.map((a) => Date.parse(a.date_utc))), t1,
+    capteurs: [...new Set(sel.map((a) => a.capteur))],
+  };
+}
+
+function renderHero(a, syn = null) {
   const now = Date.now();
-  const recentDet = a && a.detectee;
+  const recentDet = (a && a.detectee) || syn;
   const chip = $("hero-chip");
   if (recentDet) {
-    state.estimate = a.sommet_m; state.sigma = a.incertitude_m;
-    $("hero-label").textContent = "Sommet de la mer de nuages (mesuré)";
-    $("hero-num").textContent = nf.format(a.sommet_m);
-    $("hero-pm").textContent = `± ${a.incertitude_m}`;
-    $("hero-src").textContent = `${a.capteur} · ${a.satellite} · ${fmtH.format(new Date(a.date_utc))}`;
-    const ageH = (now - Date.parse(a.date_utc)) / 3.6e6;
+    const v = syn || a;
+    state.estimate = v.sommet_m; state.sigma = v.incertitude_m;
+    $("hero-num").textContent = nf.format(v.sommet_m);
+    $("hero-pm").textContent = `± ${v.incertitude_m}`;
+    if (syn && syn.n > 1) {
+      $("hero-label").textContent = `Sommet de la mer de nuages (médiane sur ${FENETRE_H} h)`;
+      $("hero-src").textContent = `${syn.n} mesures · ${syn.capteurs.join(", ")} · ${fmtH.format(new Date(syn.t0))} → ${fmtHM.format(new Date(syn.t1))}`;
+    } else {
+      const b = syn ? hist.analyses.find((x) => Date.parse(x.date_utc) === syn.t1) : a;
+      $("hero-label").textContent = "Sommet de la mer de nuages (mesuré)";
+      $("hero-src").textContent = `${b.capteur} · ${b.satellite} · ${fmtH.format(new Date(b.date_utc))}`;
+    }
+    const ageH = (now - (syn ? syn.t1 : Date.parse(a.date_utc))) / 3.6e6;
     chip.className = "chip good"; chip.textContent = ageH < 30 ? "✓ Mer de nuages détectée" : "✓ Mer de nuages détectée (mesure ancienne)";
-    setH(a.sommet_m);
+    setH(v.sommet_m);
   } else {
     // pas de détection sur l'analyse choisie : on affiche la prévision AROME la plus proche de maintenant
     const fc = aromeNow();
@@ -346,7 +371,7 @@ addEventListener("resize", resize); resize();
 
 renderTable(); renderChart();
 const startId = hist.derniere_detection || hist.derniere_analyse;
-if (startId) await showAnalysis(startId); else renderHero(null);
+if (startId) await showAnalysis(startId, true); else renderHero(null);
 $("loading").remove();
 
 const clock = new THREE.Clock();
