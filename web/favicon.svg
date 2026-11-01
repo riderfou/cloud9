@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Sommets qui émergent d'une mer de nuages -->
+  <defs>
+    <linearGradient id="ciel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a78d6"/>
+      <stop offset="1" stop-color="#7fb4ec"/>
+    </linearGradient>
+    <clipPath id="coins"><rect width="64" height="64" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#coins)">
+  <rect width="64" height="64" fill="url(#ciel)"/>
+  <path d="M4 44 L22 16 L30 28 L38 12 L60 44 Z" fill="#33403a"/>
+  <path d="M22 16 L26.5 23 L23 22 L19.5 25 L18.8 21 Z M38 12 L44 21 L40 20 L36.5 23 L35 17.5 Z" fill="#f4f3ef"/>
+  <path d="M0 40 C8 35 14 41 22 37 C30 33 36 40 44 36 C52 32 58 38 64 35 L64 50 L0 50 Z" fill="#ffffff" opacity="0.85"/>
+  <path d="M0 44 C10 40 18 45 28 42 C38 39 46 45 56 41 C60 40 62 40 64 40 L64 64 L0 64 Z" fill="#dfe9f5"/>
+  </g>
+</svg>
