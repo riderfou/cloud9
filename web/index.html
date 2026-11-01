@@ -56,28 +56,30 @@
 
 <aside id="panel" class="viz-root">
   <header>
-    <h1>Mer de nuages <span>· Grenoble</span></h1>
-    <p class="sub" id="maj">—</p>
+    <h1>Mer de nuages</h1>
+    <p class="sub"><span class="lieu">Grenoble</span> · <span id="maj">—</span></p>
   </header>
 
-  <section class="hero" aria-live="polite">
-    <div class="hero-label" id="hero-label">Sommet de la mer de nuages</div>
-    <div class="hero-value"><span id="hero-num">—</span><span class="unit"> m</span><span class="pm" id="hero-pm"></span></div>
-    <div class="hero-src" id="hero-src"></div>
-    <div class="chip" id="hero-chip"></div>
-    <div class="hero-air" id="hero-air"></div>
+  <section class="hero" id="hero" aria-live="polite">
+    <div class="hero-statut"><span class="pastille" aria-hidden="true"></span><span id="hero-statut">—</span></div>
+    <div class="hero-value" id="hero-value"><span id="hero-num">—</span><span class="unit">m</span><span class="pm" id="hero-pm"></span></div>
+    <div class="hero-titre" id="hero-titre" hidden></div>
+    <p class="hero-detail" id="hero-detail"></p>
+    <div class="hero-air" id="hero-air" hidden><span class="air-badge" id="air-badge"></span><span id="air-txt"></span></div>
   </section>
 
   <section class="controls">
-    <label for="h-slider" class="row-label">Altitude de la nappe affichée <strong id="h-val">—</strong></label>
-    <input type="range" id="h-slider" min="200" max="3000" step="10">
-    <div class="row-buttons">
-      <button id="btn-reset" type="button">Revenir à l'estimation</button>
-    </div>
     <div class="toggles">
+      <label><input type="checkbox" id="t-obs"> Nuages observés (satellite)</label>
       <label><input type="checkbox" id="t-sea" checked> Nappe simulée</label>
-      <label><input type="checkbox" id="t-obs"> Nuage observé (satellite)</label>
-      <label><input type="checkbox" id="t-cells"> Altitudes mesurées (mailles 5 km)</label>
+      <div class="nappe-ctrl" id="nappe-ctrl">
+        <label for="h-slider" class="row-label">Altitude de la nappe affichée <strong id="h-val">—</strong></label>
+        <input type="range" id="h-slider" min="200" max="3000" step="10">
+        <div class="row-buttons">
+          <button id="btn-reset" type="button">Revenir à l'estimation</button>
+        </div>
+      </div>
+      <label id="lbl-cells"><input type="checkbox" id="t-cells"> Altitudes mesurées (maille de 5 km)</label>
       <label><input type="checkbox" id="t-labels" checked> Sommets et lieux</label>
       <label><input type="checkbox" id="t-exag"> Relief ×1,5</label>
     </div>
@@ -85,8 +87,8 @@
 
   <section>
     <h2>Observations et prévision</h2>
-    <div class="legend" id="chart-legend"></div>
     <div id="chart" class="chart"></div>
+    <div class="legend" id="chart-legend"></div>
     <p class="note">Points : altitude mesurée par satellite (barre = incertitude). Ligne : sommet de la couche humide prévu par AROME (heuristique, indicatif).</p>
   </section>
 
