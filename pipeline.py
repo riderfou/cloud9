@@ -254,6 +254,71 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
         fait += 1
 
 
+# ------------------------------------------------------------------ observations Météo-France
+MF = "https://public-api.meteofrance.fr/public"
+DEPTS_MF = ("38", "73")
+
+
+def _mf_get(chemin, key, **params):
+    r = requests.get(f"{MF}/{chemin}", headers={"apikey": key, "accept": "*/*"}, params=params, timeout=60)
+    return r
+
+
+def run_obs_mf(jours=7):
+    """Observations horaires des stations Météo-France de la zone (Isère, Savoie) -> obs_mf.json.
+    Le paquet horaire couvre les dernières 24 h : on cumule à chaque passage et on garde `jours` jours.
+    Altitude prise sur le MNT à la position de la station (cohérente avec le reste de l'analyse)."""
+    key = os.environ.get("MF_OBS_API_KEY")
+    if not key:
+        print("Obs MF : MF_OBS_API_KEY absente, étape ignorée"); return
+    dst = os.path.join(OUT, "obs_mf.json")
+    base = json.load(open(dst)) if os.path.exists(dst) else {"stations": {}, "mesures": {}}
+    noms = {}
+    r = _mf_get("DPObs/v1/liste-stations", key)
+    print("Obs MF : liste-stations", r.status_code, r.headers.get("content-type"), r.text[:200].replace("\n", " | "))
+    if r.ok and "json" not in (r.headers.get("content-type") or ""):
+        import csv, io
+        for row in csv.DictReader(io.StringIO(r.text), delimiter=";"):
+            k = {c.lower(): v for c, v in row.items() if c}
+            if k.get("id_station"): noms[k["id_station"]] = k.get("nom_usuel") or k.get("nom")
+    dem = m2n.load_dem()
+    n_new = 0
+    for d in DEPTS_MF:
+        r = _mf_get("DPPaquetObs/v1/paquet/horaire", key, **{"id-departement": d, "format": "json"})
+        print(f"Obs MF : paquet horaire {d}", r.status_code, r.headers.get("content-type"), (r.text[:300] if not r.ok else ""))
+        if not r.ok:
+            continue
+        lignes = r.json()
+        if lignes:
+            print("Obs MF : champs", sorted(lignes[0]))
+        for o in lignes:
+            sid, la, lo = str(o.get("geo_id_insee")), o.get("lat"), o.get("lon")
+            if la is None or lo is None:
+                continue
+            if sid not in base["stations"]:
+                x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
+                j, i = int((x - m2n.AOI[0]) / m2n.RES), int((m2n.AOI[3] - y) / m2n.RES)
+                if not (0 <= i < m2n.H and 0 <= j < m2n.W) or not np.isfinite(dem[i, j]):
+                    continue
+                base["stations"][sid] = {"id": sid, "nom": noms.get(sid, sid), "lat": la, "lon": lo,
+                                         "x": round(x, 1), "y": round(y, 1), "alt": round(float(dem[i, j]))}
+            k = lambda c: o.get(c)
+            t = k("t"); td = k("td")
+            m = {"t": k("validity_time"), "T": None if t is None else round(t - 273.15, 1),
+                 "Td": None if td is None else round(td - 273.15, 1), "U": k("u"), "vv": k("vv"),
+                 "n": k("n"), "ff": k("ff"), "dd": k("dd"), "rr1": k("rr1"), "insolh": k("insolh")}
+            serie = base["mesures"].setdefault(sid, [])
+            if m["t"] and all(x["t"] != m["t"] for x in serie):
+                serie.append(m); n_new += 1
+    limite = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=jours)).isoformat()
+    for sid in list(base["mesures"]):
+        base["mesures"][sid] = sorted((x for x in base["mesures"][sid] if x["t"] >= limite[:19]), key=lambda x: x["t"])
+    base["maj_utc"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")
+    base["source"] = "Météo-France, données publiques d'observation"
+    write_json("obs_mf.json", base)
+    print(f"Obs MF OK : {len(base['stations'])} stations dans la zone, {n_new} nouvelles mesures")
+
+
 # ------------------------------------------------------------------ webcams (Windy)
 WINDY = "https://api.windy.com/webcams/api/v3/webcams"
 
@@ -414,6 +479,7 @@ if __name__ == "__main__":
     elif cmd == "mtg": run_mtg(dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else None)
     elif cmd == "arome": run_arome()
     elif cmd == "webcams": run_webcams(age_max_h=0)
+    elif cmd == "obs": run_obs_mf()
     elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
         reclasser()
         a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)
