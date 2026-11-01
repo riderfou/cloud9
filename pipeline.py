@@ -4,6 +4,7 @@ Pipeline mer2nuages : produit les données de la webapp dans web/data/.
   python3 pipeline.py statique            # relief, texture, sommets (une fois)
   python3 pipeline.py viirs AAAA/MM/JJ    # passages VIIRS du jour (≈ 11 h - 14 h UTC)
   python3 pipeline.py s2 [jours]          # scènes Sentinel-2 récentes (défaut : 5 derniers jours)
+  python3 pipeline.py mtg [AAAA-MM-JJ]    # Meteosat MTG, une image toutes les 30 min de jour (identifiants EUMETSAT)
   python3 pipeline.py arome               # prévision AROME (Open-Meteo)
   python3 pipeline.py tout                # viirs du jour + s2 + arome + index
 
@@ -183,6 +184,35 @@ def run_s2(days=5):
                                                           "resolution_m": 20})
 
 
+def run_mtg(jour=None, pas_min=30, max_images=24):
+    """Analyse les images MTG du jour (une toutes les `pas_min` minutes, de jour) pas encore traitées."""
+    import mtg
+    from pyorbital.astronomy import sun_zenith_angle
+    if not (os.environ.get("EUMETSAT_CONSUMER_KEY") and os.environ.get("EUMETSAT_CONSUMER_SECRET")):
+        print("MTG : identifiants EUMETSAT absents, étape ignorée"); return
+    os.makedirs(os.path.join(OUT, "analyses"), exist_ok=True)
+    jour = jour or dt.datetime.now(dt.timezone.utc).date()
+    debut = dt.datetime.combine(jour, dt.time(5, 0), dt.timezone.utc)
+    fin = min(dt.datetime.combine(jour, dt.time(18, 0), dt.timezone.utc),
+              dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=20))
+    fait = 0
+    for ident, t0, ent in mtg.chercher(debut, fin):
+        if t0.minute % pas_min or fait >= max_images:
+            continue
+        if sun_zenith_angle(t0.replace(tzinfo=None), mtg.LON, mtg.LAT) > 78:   # nuit / soleil trop bas
+            continue
+        if glob.glob(os.path.join(OUT, "analyses", f"mtg_{t0:%Y%m%d_%H}{t0.minute // 10}*.json")):
+            continue
+        try:
+            res, v, fmap, dem, est, meta = mtg.analyser(t0 + dt.timedelta(minutes=1))
+        except mtg.LicenceManquante as e:
+            print(f"  MTG : {e}"); return
+        except Exception as e:
+            print(f"  MTG {t0:%H:%M} : échec ({e})"); continue
+        save_analysis(res, np.nan_to_num(fmap), meta)
+        fait += 1
+
+
 # ------------------------------------------------------------------ AROME
 NIVEAUX = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600]
 
@@ -256,8 +286,9 @@ if __name__ == "__main__":
     if cmd == "statique": statique()
     elif cmd == "viirs": run_viirs(sys.argv[2] if len(sys.argv) > 2 else dt.date.today().strftime("%Y/%m/%d"))
     elif cmd == "s2": run_s2(int(sys.argv[2]) if len(sys.argv) > 2 else 5)
+    elif cmd == "mtg": run_mtg(dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else None)
     elif cmd == "arome": run_arome()
     elif cmd == "tout":
         if not os.path.exists(os.path.join(OUT, "relief.png")): statique()
-        run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome()
+        run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome()
     if cmd != "statique": index()

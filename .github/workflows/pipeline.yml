@@ -2,10 +2,10 @@ name: Mer de nuages — mise à jour
 
 on:
   schedule:
-    # passages VIIRS au-dessus de Grenoble : ~11 h - 13 h 30 UTC (données dispo ~30-60 min après)
-    - cron: "17 12,13,14,15 * * *"
-    # prévision AROME le reste de la journée
-    - cron: "43 0,4,8,18,21 * * *"
+    # de jour : MTG (toutes les 30 min, traitées par lot à chaque passage) + VIIRS (~11 h - 13 h 30 UTC)
+    - cron: "17 7-17 * * *"
+    # la nuit : prévision AROME seulement
+    - cron: "43 0,4,21 * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,9 +36,15 @@ jobs:
           path: dem_grenoble_20m.npy
           key: dem-v1
       - name: Pipeline
+        env:
+          EUMETSAT_CONSUMER_KEY: ${{ secrets.EUMETSAT_CONSUMER_KEY }}
+          EUMETSAT_CONSUMER_SECRET: ${{ secrets.EUMETSAT_CONSUMER_SECRET }}
         run: |
           [ -f web/data/relief.png ] || python3 pipeline.py statique
           H=$(date -u +%H)
+          if [ "$H" -ge 6 ] && [ "$H" -le 18 ]; then
+            python3 pipeline.py mtg || true
+          fi
           if [ "$H" -ge 11 ] && [ "$H" -le 16 ]; then
             python3 pipeline.py viirs "$(date -u +%Y/%m/%d)" || true
             python3 pipeline.py s2 5 || true

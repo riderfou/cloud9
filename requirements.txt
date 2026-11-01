@@ -7,3 +7,7 @@ matplotlib
 h5py
 fsspec
 aiohttp
+satpy
+pyorbital
+netCDF4
+h5netcdf
