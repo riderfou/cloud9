@@ -66,10 +66,13 @@ def analyse(dirn, tag, label):
 
 
 def analyse_pixels(v, label, capteur="VIIRS 375 m", seuils=SEUILS_VIIRS, max_dist=700.0, parallaxe=(0.0, 0.0),
-                   min_points=150):
+                   min_points=150, voisin_couvert=None):
     """v : dict de tableaux 2D x, y (UTM 31, m), I1 (visible), I3 (infrarouge court), vza (degrés).
     parallaxe : déplacement apparent (m) par mètre d'altitude (dx, dy). Nul pour une géolocalisation
-    corrigée du relief (VIIRS GITCO) ; ≈ tan(vza) × direction opposée au satellite pour MTG."""
+    corrigée du relief (VIIRS GITCO) ; ≈ tan(vza) × direction opposée au satellite pour MTG.
+    voisin_couvert : si renseigné (m), un pixel de bord n'est retenu que s'il a, dans ce rayon, un pixel
+    entièrement couvert (fraction > 0,85) : le bord d'une nappe touche la nappe. Écarte les pentes
+    rocheuses bien éclairées, plus brillantes que la référence « sol », isolées en haute montagne."""
     f, ndsi = cloud_fraction(v, seuils)
     dem = m2n.load_dem()
     # attribution de chaque point MNT (20 m) au pixel le plus proche de sa position APPARENTE
@@ -88,8 +91,15 @@ def analyse_pixels(v, label, capteur="VIIRS 375 m", seuils=SEUILS_VIIRS, max_dis
     fmap = np.full(dem.size, np.nan, "float32"); fmap[has] = fv[pix[has]]; fmap = fmap.reshape(dem.shape)
     order = np.argsort(pix[has]); p_sorted = pix[has][order]; z_sorted = dem.ravel()[has][order]
     bounds = np.searchsorted(p_sorted, np.arange(len(fv) + 1))
+    cand = np.where((fv > 0.15) & (fv < 0.85))[0]
+    if voisin_couvert:
+        pts = np.c_[v["x"][ok], v["y"][ok]]
+        plein = np.zeros(len(fv), bool)
+        for i, vois in zip(cand, tree.query_ball_point(pts[cand], voisin_couvert)):
+            plein[i] = bool((fv[vois] > 0.85).any())
+        cand = cand[plein[cand]]
     est = []
-    for p in np.where((fv > 0.15) & (fv < 0.85))[0]:
+    for p in cand:
         z = z_sorted[bounds[p]:bounds[p + 1]]
         if len(z) < min_points or np.ptp(z) < 120:  # pixel incomplet ou trop plat : peu informatif
             continue
@@ -114,7 +124,9 @@ def analyse_pixels(v, label, capteur="VIIRS 375 m", seuils=SEUILS_VIIRS, max_dis
     # mailles de 5 km
     grid = []
     if len(est):
-        px, py = v["x"][ok][est[:, 0].astype(int)], v["y"][ok][est[:, 0].astype(int)]
+        # position vraie = position apparente − h × parallaxe
+        px = v["x"][ok][est[:, 0].astype(int)] - h * parallaxe[0]
+        py = v["y"][ok][est[:, 0].astype(int)] - h * parallaxe[1]
         keep = np.abs(h - q[2]) < 300
         for x0 in np.arange(m2n.AOI[0], m2n.AOI[2], 5000):
             for y0 in np.arange(m2n.AOI[1], m2n.AOI[3], 5000):

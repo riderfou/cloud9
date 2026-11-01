@@ -26,6 +26,7 @@ API = "https://api.eumetsat.int"
 COLLECTION = "EO:EUM:DAT:0665"           # FCI L1c HRFI, disque complet
 LAT, LON = 45.2, 5.8
 BBOX = (5.3, 44.85, 6.4, 45.55)           # lon/lat de la zone à lire (un peu plus large que l'AOI)
+VOISIN_COUVERT = 1200.0                   # m : un pixel de bord doit toucher la nappe (voir viirs.analyse_pixels)
 SAT_LON = 0.0                             # MTG-I1 au-dessus de 0°
 SEUILS_MTG = {"neige_swir_max": 0.10, "nuage_swir_min": 0.20}   # canal 2,2 µm : à affiner sur cas réels
 
@@ -167,7 +168,7 @@ def analyser(instant, dossier=None, garder=False):
         label = f"mtg_{quand:%Y%m%d_%H%M}"
         res, v, fmap, dem, est = viirs.analyse_pixels(
             v, label, capteur="MTG-FCI 500 m", seuils=SEUILS_MTG, max_dist=1200.0,
-            parallaxe=parallaxe_utm(), min_points=300)
+            parallaxe=parallaxe_utm(), min_points=300, voisin_couvert=VOISIN_COUVERT)
     finally:
         if not garder:
             shutil.rmtree(dossier, ignore_errors=True)
