@@ -35,7 +35,23 @@
 <body>
 <div id="scene"><div id="labels"></div>
   <div id="loading">Chargement du relief…</div>
-  <div id="hint">Glisser pour tourner · clic droit pour déplacer · molette pour zoomer</div>
+  <div id="hint"><span class="souris">Glisser pour tourner · clic droit pour déplacer · molette pour zoomer</span><span class="tactile">Glisser pour tourner · deux doigts pour zoomer et déplacer</span></div>
+  <div id="nav">
+    <button id="btn-nord" type="button" title="Réorienter vers le nord" aria-label="Réorienter la carte vers le nord">
+      <svg id="boussole" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3 L16 12 L8 12 Z" fill="#e0412c"/>
+        <path d="M12 21 L8 12 L16 12 Z" fill="currentColor" opacity=".45"/>
+      </svg>
+    </button>
+    <div class="zoom">
+      <button id="btn-zoom-in" type="button" title="Zoomer" aria-label="Zoomer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="btn-zoom-out" type="button" title="Dézoomer" aria-label="Dézoomer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
 </div>
 
 <aside id="panel" class="viz-root">

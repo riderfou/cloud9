@@ -407,8 +407,47 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && Date.now() - dernierControle > 60e3) rafraichir();
 });
 
+// ------------------------------------------------------------------ navigation : nord et zoom
+// Le nord est vers -Z. Azimut (theta) de la caméra autour de la cible : 0 = caméra au sud, regard vers le nord.
+const sph = new THREE.Spherical(), off = new THREE.Vector3();
+let anim = null;   // {t0, dur, de: {theta, radius}, vers: {theta, radius}}
+function animerCamera(vers, dur = 600) {
+  off.copy(camera.position).sub(controls.target); sph.setFromVector3(off);
+  const de = { theta: sph.theta, radius: sph.radius };
+  vers = { theta: vers.theta ?? de.theta, radius: vers.radius ?? de.radius };
+  // plus court chemin angulaire
+  let d = vers.theta - de.theta; d = Math.atan2(Math.sin(d), Math.cos(d)); vers.theta = de.theta + d;
+  anim = { t0: performance.now(), dur, de, vers };
+}
+function avancerAnimation() {
+  if (!anim) return;
+  const k = Math.min(1, (performance.now() - anim.t0) / anim.dur), e = 1 - Math.pow(1 - k, 3);
+  off.copy(camera.position).sub(controls.target); sph.setFromVector3(off);
+  sph.theta = anim.de.theta + (anim.vers.theta - anim.de.theta) * e;
+  sph.radius = anim.de.radius + (anim.vers.radius - anim.de.radius) * e;
+  camera.position.copy(controls.target).add(off.setFromSpherical(sph));
+  if (k >= 1) anim = null;
+}
+controls.addEventListener("start", () => { anim = null; });   // l'utilisateur reprend la main
+const zoomer = (f) => {
+  off.copy(camera.position).sub(controls.target);
+  const r = (anim ? anim.vers.radius : off.length()) * f;
+  animerCamera({ radius: THREE.MathUtils.clamp(r, controls.minDistance, controls.maxDistance) }, 300);
+};
+$("btn-nord").addEventListener("click", () => animerCamera({ theta: 0 }));
+$("btn-zoom-in").addEventListener("click", () => zoomer(0.7));
+$("btn-zoom-out").addEventListener("click", () => zoomer(1 / 0.7));
+const boussole = $("boussole");
+let angleAffiche = null;
+function majBoussole() {
+  off.copy(camera.position).sub(controls.target);
+  const a = Math.round(THREE.MathUtils.radToDeg(Math.atan2(off.x, off.z)) * 10) / 10;
+  if (a !== angleAffiche) { boussole.style.transform = `rotate(${a}deg)`; angleAffiche = a; }
+}
+
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   seaMat.uniforms.uTime.value = clock.getElapsedTime();
-  controls.update(); renderer.render(scene, camera); updateLabels();
+  avancerAnimation();
+  controls.update(); renderer.render(scene, camera); updateLabels(); majBoussole();
 });

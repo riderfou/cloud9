@@ -45,7 +45,33 @@ body { display: flex; background: #9cc3e6; }
 #scene canvas { display: block; }
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; text-shadow: 0 1px 3px #0006; }
-#hint { position: absolute; left: 12px; bottom: 10px; font-size: 12px; color: #fff; text-shadow: 0 1px 2px #0008; }
+#hint { position: absolute; left: 12px; right: 64px; bottom: 10px; font-size: 12px; color: #fff; text-shadow: 0 1px 2px #0008; }
+#hint .tactile { display: none; }
+@media (pointer: coarse) { #hint .souris { display: none; } #hint .tactile { display: inline; } }
+
+/* boutons de navigation : boussole (retour au nord) au-dessus du zoom */
+#nav { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+#nav button {
+  display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0;
+  background: #fcfcfb; color: #2b2b29; cursor: pointer;
+}
+#nav button svg { width: 22px; height: 22px; }
+#btn-nord { border-radius: 50%; box-shadow: 0 1px 4px #0004; }
+#boussole { transition: none; }
+#nav .zoom { display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px #0004; }
+#nav .zoom button + button { border-top: 1px solid #e2e0da; }
+#nav button:hover { background: #f2f1ee; }
+#nav button:focus-visible { outline: 2px solid #2a78d6; outline-offset: 2px; }
+@media (prefers-color-scheme: dark) {
+  #nav button { background: #242422; color: #f0efec; }
+  #nav button:hover { background: #2f2f2c; }
+  #nav .zoom button + button { border-top-color: #3a3936; }
+}
+/* mobile / écran tactile : on zoome au pincement, pas besoin de boutons */
+@media (max-width: 800px), (pointer: coarse) {
+  #nav .zoom { display: none; }
+  #nav button { width: 40px; height: 40px; }
+}
 
 .lbl {
   position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
