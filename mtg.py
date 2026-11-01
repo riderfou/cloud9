@@ -25,7 +25,7 @@ import mer2nuages as m2n
 API = "https://api.eumetsat.int"
 COLLECTION = "EO:EUM:DAT:0665"           # FCI L1c HRFI, disque complet
 LAT, LON = 45.2, 5.8
-BBOX = (5.3, 44.85, 6.4, 45.55)           # lon/lat de la zone à lire (un peu plus large que l'AOI)
+BBOX = (5.2, 44.75, 6.55, 45.7)           # lon/lat de la zone à lire (un peu plus large que l'AOI)
 VOISIN_COUVERT = 1200.0                   # m : un pixel de bord doit toucher la nappe (voir viirs.analyse_pixels)
 SAT_LON = 0.0                             # MTG-I1 au-dessus de 0°
 SEUILS_MTG = {"neige_swir_max": 0.10, "nuage_swir_min": 0.20}   # canal 2,2 µm : à affiner sur cas réels
@@ -174,8 +174,22 @@ def lire_nuit(fichiers, quand):
 PARAMS_NUIT = dict(capteur="MTG-FCI IR 1 km (nuit)", max_dist=2000.0, min_points=1000, voisin_couvert=2000.0)
 
 
+# Hauteur du soleil (angle zénithal, degrés) : visible de jour, infrarouge de nuit. Entre les deux (aube,
+# crépuscule), le visible manque de lumière et le soleil perturbe déjà le canal 3,8 µm : pas d'analyse.
+SZA_JOUR_MAX = 78.0
+SZA_NUIT_MIN = 87.0
+
+
+def methode(quand, lat=LAT, lon=LON):
+    """'jour', 'nuit' ou None (crépuscule) selon la hauteur du soleil au-dessus de Grenoble."""
+    from pyorbital.astronomy import sun_zenith_angle
+    sza = float(sun_zenith_angle(quand.replace(tzinfo=None), lon, lat))
+    return "jour" if sza <= SZA_JOUR_MAX else "nuit" if sza >= SZA_NUIT_MIN else None
+
+
 def analyser(instant, dossier=None, garder=False):
-    """Analyse l'image MTG la plus proche de `instant` (datetime UTC). Renvoie (res, v, fmap, dem, est, meta)."""
+    """Analyse l'image MTG la plus proche de `instant` (datetime UTC) : visible le jour, infrarouge la nuit.
+    Renvoie (res, v, fmap, dem, est, meta)."""
     import viirs
     prods = chercher(instant - dt.timedelta(minutes=10), instant + dt.timedelta(minutes=10))
     if not prods:
@@ -190,17 +204,22 @@ def analyser(instant, dossier=None, garder=False):
     # heure d'acquisition au-dessus de Grenoble : début du chunk (dans le nom de fichier)
     m = re.search(r"_OPE_(\d{14})_(\d{14})_", os.path.basename(fichiers[0]))
     quand = dt.datetime.strptime(m.group(1), "%Y%m%d%H%M%S").replace(tzinfo=dt.timezone.utc) if m else t0
+    nuit = methode(quand) == "nuit"
+    label = f"mtg_{quand:%Y%m%d_%H%M}"
     try:
-        v = lire(fichiers, quand)
-        label = f"mtg_{quand:%Y%m%d_%H%M}"
-        res, v, fmap, dem, est = viirs.analyse_pixels(
-            v, label, capteur="MTG-FCI 500 m", seuils=SEUILS_MTG, max_dist=1200.0,
-            parallaxe=parallaxe_utm(), min_points=300, voisin_couvert=VOISIN_COUVERT)
+        if nuit:
+            res, v, fmap, dem, est = viirs.analyse_pixels(lire_nuit(fichiers, quand), label,
+                                                         parallaxe=parallaxe_utm(), **PARAMS_NUIT)
+        else:
+            res, v, fmap, dem, est = viirs.analyse_pixels(
+                lire(fichiers, quand), label, capteur="MTG-FCI 500 m", seuils=SEUILS_MTG, max_dist=1200.0,
+                parallaxe=parallaxe_utm(), min_points=300, voisin_couvert=VOISIN_COUVERT)
     finally:
         if not garder:
             shutil.rmtree(dossier, ignore_errors=True)
-    meta = {"id": label, "date_utc": quand.isoformat(), "capteur": "MTG-FCI", "satellite": "MTG-I1",
-            "resolution_m": 500, "produit": ident}
+    meta = {"id": label, "date_utc": quand.isoformat(), "capteur": "MTG-FCI IR" if nuit else "MTG-FCI",
+            "satellite": "MTG-I1", "resolution_m": 1000 if nuit else 500, "produit": ident,
+            "methode": "infrarouge 10,5 - 3,8 µm (nuit)" if nuit else "visible 0,6 / 2,2 µm (jour)"}
     return res, v, fmap, dem, est, meta
 
 

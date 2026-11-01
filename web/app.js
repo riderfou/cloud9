@@ -317,7 +317,7 @@ function heureArome(t = Date.now()) {
   for (const h of arome.heures) { const d = Math.abs(Date.parse(h.t) - t); if (!best || d < best.d) best = { d, h }; }
   return best && best.d < 3 * 3.6e6 ? best.h : null;
 }
-const NOM_CAPTEUR = { "MTG-FCI": () => "Meteosat", "VIIRS": (a) => `VIIRS ${a.satellite}`, "Sentinel-2": () => "Sentinel-2" };
+const NOM_CAPTEUR = { "MTG-FCI": () => "Meteosat", "MTG-FCI IR": () => "Meteosat (infrarouge, nuit)", "VIIRS": (a) => `VIIRS ${a.satellite}`, "Sentinel-2": () => "Sentinel-2" };
 const nomSource = (a) => (NOM_CAPTEUR[a.capteur] || (() => `${a.capteur} ${a.satellite}`))(a);
 const fmtJour = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "numeric", month: "short" });
 // « à 16:08 » aujourd'hui, « le dim. 1 nov. à 16:08 » sinon
@@ -519,7 +519,7 @@ function renderChart() {
   for (const a of obs) {
     const x = X(Date.parse(a.date_utc)), deg = situationDe(a) === "degradee";
     el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-2)", "stroke-width": 2, opacity: deg ? 0.45 : 1 }, svg);
-    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur === "MTG-FCI" ? 3 : 4.5, fill: "var(--series-2)", "fill-opacity": deg ? 0.45 : 1, stroke: "var(--surface-1)", "stroke-width": a.capteur === "MTG-FCI" ? 1 : 2 }, svg);
+    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur.startsWith("MTG") ? 3 : 4.5, fill: "var(--series-2)", "fill-opacity": deg ? 0.45 : 1, stroke: "var(--surface-1)", "stroke-width": a.capteur.startsWith("MTG") ? 1 : 2 }, svg);
   }
   // images sans mer de nuages : marqueur creux sur la ligne de base (l'altitude n'a pas de sens)
   for (const a of sansMer) {

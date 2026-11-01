@@ -2,10 +2,9 @@ name: Mer de nuages — mise à jour
 
 on:
   schedule:
-    # de jour : MTG (toutes les 30 min, traitées par lot à chaque passage) + VIIRS (~11 h - 13 h 30 UTC)
-    - cron: "17 7-17 * * *"
-    # la nuit : prévision AROME seulement
-    - cron: "43 0,4,21 * * *"
+    # toutes les heures : MTG (visible le jour, infrarouge la nuit, images toutes les 30 min traitées par lot),
+    # AROME, observations Météo-France ; VIIRS et Sentinel-2 vers midi
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -33,8 +32,8 @@ jobs:
       - name: Cache MNT
         uses: actions/cache@v4
         with:
-          path: dem_grenoble_20m.npy
-          key: dem-v1
+          path: dem_zone_v2_20m.npy
+          key: dem-v2
       - name: Pipeline
         env:
           EUMETSAT_CONSUMER_KEY: ${{ secrets.EUMETSAT_CONSUMER_KEY }}
@@ -44,9 +43,7 @@ jobs:
         run: |
           [ -f web/data/relief.png ] || python3 pipeline.py statique
           H=$(date -u +%H)
-          if [ "$H" -ge 6 ] && [ "$H" -le 18 ]; then
-            python3 pipeline.py mtg || true
-          fi
+          python3 pipeline.py mtg || true
           if [ "$H" -ge 11 ] && [ "$H" -le 16 ]; then
             python3 pipeline.py viirs "$(date -u +%Y/%m/%d)" || true
             python3 pipeline.py s2 5 || true

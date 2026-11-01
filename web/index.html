@@ -119,11 +119,12 @@
     <p>Le bord d'une mer de nuages suit les courbes de niveau. Sur chaque image satellite, on repère les nuages bas
       (brillants dans le visible <em>et</em> à 1,6 µm, là où la neige est sombre), puis on lit l'altitude du relief
       là où le terrain émerge du nuage. Avec VIIRS (375 m), on utilise la fraction nuageuse de chaque pixel de bord et le
-      MNT à 20 m à l'intérieur du pixel.</p>
+      MNT à 20 m à l'intérieur du pixel. La nuit, Meteosat repère les nuages bas en infrarouge : leurs gouttelettes
+      émettent moins à 3,8 µm qu'à 10,5 µm (résolution 1 km).</p>
     <p>Pour vérifier qu'il s'agit bien d'une mer de nuages, on contrôle sur l'image que le relief nettement au-dessus du
       sommet estimé est dégagé. Sinon, la nappe se dégrade ou s'est disloquée et l'altitude n'a plus de sens. En parallèle,
       le profil AROME indique si la masse d'air est favorable : air stable ou inversion de température, peu de vent, pas de pluie.</p>
-    <p>Sources : Meteosat MTG (EUMETSAT), NOAA VIIRS (Suomi-NPP, NOAA-20, NOAA-21) et Sentinel-2 L2A via AWS Open Data,
+    <p>Sources : Meteosat MTG (EUMETSAT, visible et infrarouge), NOAA VIIRS (Suomi-NPP, NOAA-20, NOAA-21) et Sentinel-2 L2A via AWS Open Data,
       Copernicus DEM GLO-30, AROME Météo-France via Open-Meteo. Valeurs expérimentales, non validées par des mesures au sol.</p>
   </section>
 </aside>

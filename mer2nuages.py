@@ -16,31 +16,59 @@ from rasterio.warp import reproject
 from rasterio.transform import from_origin
 from scipy import ndimage
 
-S2 = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/T/GL"
-DEM = "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N45_00_E00{lon}_00_DEM/Copernicus_DSM_COG_10_N45_00_E00{lon}_00_DEM.tif"
+S2_BASE = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/T"
+S2 = f"{S2_BASE}/GL"               # tuile principale 31TGL (Grenoble, Grésivaudan, Belledonne)
+# La zone déborde de 31TGL à l'ouest et au sud : tuiles voisines du même passage, en complément
+TUILES_VOISINES = ("FL", "GK", "FK")
+DEM = "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N{lat}_00_E00{lon}_00_DEM/Copernicus_DSM_COG_10_N{lat}_00_E00{lon}_00_DEM.tif"
 CRS = "EPSG:32631"
-AOI = (699960, 4990200, 759960, 5045000)  # Grenoble, Grésivaudan, Chartreuse, Vercors N, Belledonne
+# Grenoble, Grésivaudan, Chartreuse, Vercors, Belledonne, Voironnais, Chambéry, Matheysine
+# (zone d'origine 699960-759960 x 4990200-5045000, élargie de 10 km de chaque côté le 01/11/2026)
+AOI = (689960, 4980200, 769960, 5055000)
 RES = 20.0
 W, H = int((AOI[2] - AOI[0]) / RES), int((AOI[3] - AOI[1]) / RES)
 TRANSFORM = from_origin(AOI[0], AOI[3], RES, RES)
 
 
-def read_band(scene, band, scale=1e-4):
+def lire_s2(scene, fichier, bandes=1, out_shape=None):
+    """Lit un fichier d'une scène 31TGL sur la zone, complété par les tuiles voisines du même passage
+    (même date, même satellite) là où 31TGL n'a pas de données. 0 = pas de donnée."""
     y, m = scene.split("_")[2][:4], str(int(scene.split("_")[2][4:6]))
-    with rasterio.open(f"{S2}/{y}/{m}/{scene}/{band}.tif") as s:
-        a = s.read(1, window=from_bounds(*AOI, s.transform), out_shape=(H, W),
-                   resampling=Resampling.average, boundless=True, fill_value=0)
-    return a.astype("float32") * scale
+    out_shape = out_shape or (H, W)
+    out = None
+    for tuile in ("GL",) + TUILES_VOISINES:
+        sc = scene.replace("_31TGL_", f"_31T{tuile}_")
+        try:
+            with rasterio.open(f"{S2_BASE}/{tuile}/{y}/{m}/{sc}/{fichier}") as s:
+                idx = 1 if bandes == 1 else list(range(1, bandes + 1))
+                a = s.read(idx, window=from_bounds(*AOI, s.transform), out_shape=out_shape if bandes == 1 else (bandes,) + out_shape,
+                           resampling=Resampling.average, boundless=True, fill_value=0)
+        except Exception as e:
+            if tuile == "GL":
+                print(f"  Sentinel-2 : {sc}/{fichier} illisible ({e})")
+            continue                       # tuile voisine absente pour ce passage
+        if out is None:
+            out = a
+        else:
+            vide = (out == 0) if bandes == 1 else (out == 0).all(axis=0, keepdims=True)
+            out = np.where(vide, a, out)
+    if out is None:
+        raise FileNotFoundError(f"{scene}/{fichier}")
+    return out
 
 
-def load_dem(cache="dem_grenoble_20m.npy"):
+def read_band(scene, band, scale=1e-4):
+    return lire_s2(scene, f"{band}.tif").astype("float32") * scale
+
+
+def load_dem(cache="dem_zone_v2_20m.npy"):
     try:
         return np.load(cache)
     except FileNotFoundError:
         pass
     out = np.full((H, W), np.nan, "float32")
-    for lon in (5, 6):
-        with rasterio.open(DEM.format(lon=lon)) as s:
+    for lat, lon in ((45, 5), (45, 6), (44, 5), (44, 6)):
+        with rasterio.open(DEM.format(lat=lat, lon=lon)) as s:
             tmp = np.full((H, W), np.nan, "float32")
             reproject(rasterio.band(s, 1), tmp, dst_transform=TRANSFORM, dst_crs=CRS,
                       resampling=Resampling.bilinear, dst_nodata=np.nan)

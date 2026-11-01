@@ -1,1 +1,1 @@
-{"crs":"EPSG:32631","aoi":[699960,4990200,759960,5045000],"grille_web":[600,548],"pas_m":100.0,"texture":{"scene":"S2C_31TGL_20251104_0_L2A"},"relief":"Copernicus DEM GLO-30"}
+{"crs":"EPSG:32631","aoi":[689960,4980200,769960,5055000],"grille_web":[800,748],"pas_m":100.0,"texture":{"scene":"S2C_31TGL_20251104_0_L2A"},"relief":"Copernicus DEM GLO-30"}

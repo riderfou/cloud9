@@ -9,11 +9,12 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 |---|---|
 | `mer2nuages.py` | Méthode Sentinel-2 (20 m) : masque nuage bas + altitude des bords latéraux |
 | `viirs.py` | Méthode VIIRS (375 m) : fraction nuageuse par pixel + MNT 20 m à l'intérieur du pixel |
-| `mtg.py` | Meteosat MTG-FCI (500 m, toutes les 10 min) : chunk 36 seulement, correction de parallaxe (identifiants EUMETSAT) |
+| `mtg.py` | Meteosat MTG-FCI toutes les 10 min : visible 500 m le jour, infrarouge 1 km la nuit ; chunk 36 seulement, correction de parallaxe (identifiants EUMETSAT) |
+| `tools/nuit_mtg.py` | Prototype de la méthode de nuit, comparée au visible et aux stations |
 | `tools/calibrage_mtg.py` | Calibrage MTG sur une journée (variantes parallaxe, seuils, filtre de bord) |
 | Webcams Windy | `pipeline.py webcams` : webcams de la zone (API Windy v3, clé `WINDY_WEBCAMS_API_KEY`), placées sur la carte avec leur altitude et un lecteur intégré |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
-| `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets |
+| `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets, webcams, observations Météo-France (`obs_mf.json`, clé `MF_OBS_API_KEY`, API DPObs v2) |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |
 | `.github/workflows/pipeline.yml` | Mise à jour automatique + publication sur GitHub Pages |
 | `scan_dates.py` | Planche contact Sentinel-2 pour repérer des journées de mer de nuages |
@@ -25,6 +26,13 @@ python3 pipeline.py statique                 # relief, texture, sommets (une foi
 python3 pipeline.py tout                     # VIIRS du jour + Sentinel-2 récents + AROME + index
 cd web && python3 -m http.server 8000        # puis http://localhost:8000
 ```
+
+## Zone d'étude
+
+80 × 75 km en UTM 31N (689 960-769 960 × 4 980 200-5 055 000), élargie de 10 km de chaque côté le 01/11/2026 :
+Chartreuse, Vercors nord, Belledonne, Grésivaudan, Voironnais, Chambéry, Matheysine. MNT Copernicus à 20 m (4 tuiles).
+Sentinel-2 : tuile 31TGL complétée par 31TFL, 31TGK et 31TFK (même passage). Les analyses antérieures à
+l'élargissement gardent leur emprise d'origine (champ `emprise`), leurs masques étant recadrés dans la nouvelle grille.
 
 ## Meteosat MTG
 
@@ -59,6 +67,18 @@ python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte
 python3 mtg.py analyser 2026-10-31T10:50                     # avec identifiants -> out/mtg_*.png
 ```
 
+### La nuit : infrarouge
+
+De nuit (soleil à plus de 87° du zénith), le nuage bas est repéré par l'écart de température de brillance
+10,5 - 3,8 µm (canaux à 1 km du même fichier) : environ +4 K sur un nuage de gouttelettes, environ 0 K sur un sol dégagé
+ou enneigé. La fraction nuageuse qui en découle passe dans la même méthode des bords (parallaxe, contact avec la nappe).
+Entre 78° et 87° (aube, crépuscule), aucune des deux méthodes n'est fiable : pas d'analyse.
+
+Nuit du 31/10 au 01/11/2026 (`tools/nuit_mtg.py`) : mer de nuages détectée sur toutes les images de 16 h 08 à 6 h 08 UTC,
+la nappe montant de 1 330 à 1 556 m. Au matin, le visible prend le relais à 1 623 m. Chaque fois que les stations
+Météo-France donnent une fourchette, l'infrarouge y tombe (exemple à 2 h : Col de Porte, 1 325 m, est saturé ;
+Saint-Hilaire, 1 756 m, est sec et plus doux ; l'infrarouge donne 1 495 m). AROME sous-estime la nappe d'environ 500 m cette nuit-là.
+
 ## Situation : mer de nuages ou pas ? (`situation.py`)
 
 Une image où l'on trouve des « bords » de nuage n'est pas forcément une mer de nuages. Deux diagnostics indépendants :
@@ -73,7 +93,8 @@ Une image où l'on trouve des « bords » de nuage n'est pas forcément une mer 
   Seules les deux premières situations donnent une altitude.
 - **Masse d'air (AROME).** Décroissance de la température entre le fond de vallée et environ 2 000 m (stable si ≤ 4 °C/km
   ou en cas d'inversion, instable si ≥ 6 °C/km), vent à 850 hPa (gêne à partir de 25 km/h, fort à partir de 40 km/h)
-  et pluie. Résultat : favorable, limite ou défavorable.
+  et pluie. Le vent ne compte que si l'air n'est pas stable : au-dessus d'une inversion, la nuit du 31/10 au 01/11,
+  un vent de 27 à 41 km/h a laissé la nappe intacte. Résultat : favorable, limite ou défavorable.
 
 Cas du 01/11/2026 : la nappe monte de 1 620 à 2 085 m dans la matinée, puis se disloque avec le vent du nord.
 

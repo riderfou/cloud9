@@ -4,7 +4,8 @@ Pipeline mer2nuages : produit les données de la webapp dans web/data/.
   python3 pipeline.py statique            # relief, texture, sommets (une fois)
   python3 pipeline.py viirs AAAA/MM/JJ    # passages VIIRS du jour (≈ 11 h - 14 h UTC)
   python3 pipeline.py s2 [jours]          # scènes Sentinel-2 récentes (défaut : 5 derniers jours)
-  python3 pipeline.py mtg [AAAA-MM-JJ]    # Meteosat MTG, une image toutes les 30 min de jour (identifiants EUMETSAT)
+  python3 pipeline.py mtg [AAAA-MM-JJ]    # Meteosat MTG toutes les 30 min, visible le jour, infrarouge la nuit
+                                          # (sans date : 6 dernières heures ; avec date : la journée UTC entière)
   python3 pipeline.py arome               # prévision AROME (Open-Meteo)
   python3 pipeline.py tout                # viirs du jour + s2 + arome + index
 
@@ -63,6 +64,15 @@ SOMMETS = [  # nom, lat, lon, altitude officielle (m), type
     ("Grand Colon", 45.1410, 5.9570, 2394, "sommet"),
     ("Croix de Belledonne", 45.1825, 5.9997, 2926, "sommet"),
     ("Prapoutel (7 Laux)", 45.2550, 5.9900, 1400, "lieu"),
+    # marges de la zone élargie (+10 km)
+    ("Chambéry", 45.5646, 5.9178, 270, "lieu"),
+    ("Voiron", 45.3640, 5.5890, 290, "lieu"),
+    ("Villard-de-Lans", 45.0710, 5.5530, 1040, "lieu"),
+    ("Vizille", 45.0780, 5.7710, 280, "lieu"),
+    ("Allevard", 45.3940, 6.0750, 475, "lieu"),
+    ("Le Bourg-d'Oisans", 45.0550, 6.0310, 720, "lieu"),
+    ("Le Grand Som", 45.3700, 5.7770, 2026, "sommet"),
+    ("Le Taillefer", 45.0480, 5.9520, 2857, "sommet"),
 ]
 
 
@@ -79,11 +89,8 @@ def statique():
     from rasterio.windows import from_bounds
     from rasterio.enums import Resampling
     scene = "S2C_31TGL_20251104_0_L2A"
-    url = f"{m2n.S2}/2025/11/{scene}/TCI.tif"
     tw, th = m2n.W * 2 // 3, m2n.H * 2 // 3
-    with rasterio.open(url) as s:
-        a = s.read(window=from_bounds(*m2n.AOI, s.transform), out_shape=(3, th, tw),
-                   resampling=Resampling.average, boundless=True, fill_value=0)
+    a = m2n.lire_s2(scene, "TCI.tif", bandes=3, out_shape=(th, tw))   # mosaïque des tuiles du même passage
     a = np.moveaxis(a, 0, -1).astype("float32")
     a = np.clip((a / 255.0) ** 0.85 * 1.15, 0, 1) * 255
     Image.fromarray(a.astype(np.uint8)).save(os.path.join(OUT, "texture.jpg"), quality=82)
@@ -156,6 +163,11 @@ def classer(rec, frac, z):
     if "detectee_brute" not in rec:
         rec["detectee_brute"] = rec["detectee"]
     h = rec["sommet_m"] if rec["sommet_m"] is not None else rec.get("sommet_brut_m")
+    if rec.get("emprise"):     # analyse faite sur une zone plus petite (avant l'élargissement) : métriques sur cette zone
+        e = rec["emprise"]; pas = m2n.RES * STEP
+        c0, c1 = int((e[0] - m2n.AOI[0]) / pas), int((e[2] - m2n.AOI[0]) / pas)
+        r0, r1 = int((m2n.AOI[3] - e[3]) / pas), int((m2n.AOI[3] - e[1]) / pas)
+        frac, z = frac[r0:r1, c0:c1], z[r0:r1, c0:c1]
     m = sit.metriques_masque(frac, z, h)
     rec["metriques"] = {k: (None if v is None else round(v, 3)) for k, v in m.items()}
     rec["situation"] = sit.classer_image(m, rec["detectee_brute"], h)
@@ -225,22 +237,21 @@ def run_s2(days=5):
                                                           "resolution_m": 20})
 
 
-def run_mtg(jour=None, pas_min=30, max_images=24):
-    """Analyse les images MTG du jour (une toutes les `pas_min` minutes, de jour) pas encore traitées."""
+def run_mtg(debut=None, fin=None, pas_min=30, max_images=16, heures=6):
+    """Analyse les images MTG (une toutes les `pas_min` minutes) pas encore traitées, de jour (visible)
+    comme de nuit (infrarouge). Par défaut : les `heures` dernières heures, les plus récentes d'abord."""
     import mtg
-    from pyorbital.astronomy import sun_zenith_angle
     if not (os.environ.get("EUMETSAT_CONSUMER_KEY") and os.environ.get("EUMETSAT_CONSUMER_SECRET")):
         print("MTG : identifiants EUMETSAT absents, étape ignorée"); return
     os.makedirs(os.path.join(OUT, "analyses"), exist_ok=True)
-    jour = jour or dt.datetime.now(dt.timezone.utc).date()
-    debut = dt.datetime.combine(jour, dt.time(5, 0), dt.timezone.utc)
-    fin = min(dt.datetime.combine(jour, dt.time(18, 0), dt.timezone.utc),
-              dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=20))
+    maintenant = dt.datetime.now(dt.timezone.utc)
+    fin = min(fin or maintenant, maintenant - dt.timedelta(minutes=20))
+    debut = debut or fin - dt.timedelta(hours=heures)
     fait = 0
-    for ident, t0, ent in mtg.chercher(debut, fin):
+    for ident, t0, ent in sorted(mtg.chercher(debut, fin), key=lambda p: p[1], reverse=True):
         if t0.minute % pas_min or fait >= max_images:
             continue
-        if sun_zenith_angle(t0.replace(tzinfo=None), mtg.LON, mtg.LAT) > 78:   # nuit / soleil trop bas
+        if mtg.methode(t0 + dt.timedelta(minutes=8)) is None:      # aube / crépuscule
             continue
         if glob.glob(os.path.join(OUT, "analyses", f"mtg_{t0:%Y%m%d_%H}{t0.minute // 10}*.json")):
             continue
@@ -348,7 +359,7 @@ def run_obs_mf(jours=7, max_requetes=280):
 WINDY = "https://api.windy.com/webcams/api/v3/webcams"
 
 
-def run_webcams(lat=45.27, lon=5.94, rayon_km=40, age_max_h=12):
+def run_webcams(lat=45.27, lon=5.94, rayon_km=60, age_max_h=12):
     """Liste des webcams Windy dans la zone -> webcams.json (position, altitude MNT, lecteur intégrable).
     Les URL d'images de l'offre gratuite expirent au bout de quelques minutes : on ne garde que le
     lecteur Windy (iframe public, sans clé) et le lien vers la page de la webcam."""
@@ -501,7 +512,12 @@ if __name__ == "__main__":
     if cmd == "statique": statique()
     elif cmd == "viirs": run_viirs(sys.argv[2] if len(sys.argv) > 2 else dt.date.today().strftime("%Y/%m/%d"))
     elif cmd == "s2": run_s2(int(sys.argv[2]) if len(sys.argv) > 2 else 5)
-    elif cmd == "mtg": run_mtg(dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else None)
+    elif cmd == "mtg":
+        if len(sys.argv) > 2:
+            j = dt.datetime.combine(dt.date.fromisoformat(sys.argv[2]), dt.time(0), dt.timezone.utc)
+            run_mtg(j, j + dt.timedelta(days=1), max_images=48)
+        else:
+            run_mtg()
     elif cmd == "arome": run_arome()
     elif cmd == "webcams": run_webcams(age_max_h=0)
     elif cmd == "obs": run_obs_mf()

@@ -15,7 +15,7 @@ import mer2nuages as m2n
 def load(dirn, tag):
     geo = h5py.File(glob.glob(f"{dirn}/GITCO_*{tag}*.h5")[0])["All_Data/VIIRS-IMG-GEO-TC_All"]
     lat, lon = geo["Latitude"][:], geo["Longitude"][:]
-    sel = (lat > 44.85) & (lat < 45.55) & (lon > 5.3) & (lon < 6.4)
+    sel = (lat > 44.75) & (lat < 45.7) & (lon > 5.2) & (lon < 6.55)   # zone + marge (voir mtg.BBOX)
     r, c = np.where(sel)
     r0, r1, c0, c1 = r.min(), r.max() + 1, c.min(), c.max() + 1
     out = {"lat": lat[r0:r1, c0:c1], "lon": lon[r0:r1, c0:c1],
