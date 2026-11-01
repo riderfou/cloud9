@@ -121,6 +121,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: v
 .row-label { display: block; font-size: 13px; color: var(--text-secondary); }
 .row-label strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
 input[type=range] { width: 100%; margin: 8px 0 4px; accent-color: var(--series-1); }
+.row-buttons button:disabled { opacity: .5; cursor: default; }
+.row-buttons button[hidden] { display: none; }
 .row-buttons button {
   font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);

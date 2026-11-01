@@ -137,7 +137,14 @@ function setH(H) {
   state.H = H;
   sea.position.y = (H * state.exag) / S; seaMat.uniforms.uH.value = H;
   $("h-slider").value = H; $("h-val").textContent = `${nf.format(H)} m`;
-  renderPeaks();
+  renderPeaks(); majBoutonSimulation();
+}
+// « Revenir à la simulation » : masqué s'il n'y a pas d'altitude simulée (pas de conditions pour une mer
+// de nuages), inactif tant que le curseur n'a pas été déplacé.
+function majBoutonSimulation() {
+  const b = $("btn-reset");
+  b.hidden = state.estimate == null;
+  b.disabled = state.estimate == null || state.H === state.estimate || !$("t-sea").checked;
 }
 
 // caméra : depuis le sud-ouest, regard vers Grenoble / Grésivaudan
@@ -411,7 +418,7 @@ function appliquerCalques(valide, avecImage) {
   if (state.cleCalques === cle) return;
   state.cleCalques = cle;
   $("t-sea").checked = sea.visible = !!valide;
-  $("t-obs").checked = obsMesh.visible = !valide && !!avecImage;
+  $("t-obs").checked = obsMesh.visible = !!avecImage;
   renderPeaks(); majCases();
 }
 // « Altitudes mesurées » n'a de sens que si l'image affichée montre une mer de nuages ;
@@ -426,7 +433,8 @@ function majCases() {
   updateLabels();
   const nc = $("nappe-ctrl"), on = $("t-sea").checked;
   nc.classList.toggle("inactif", !on);
-  nc.querySelectorAll("input, button").forEach((x) => (x.disabled = !on));
+  nc.querySelectorAll("input").forEach((x) => (x.disabled = !on));
+  majBoutonSimulation();
 }
 
 // ------------------------------------------------------------------ tableau des analyses

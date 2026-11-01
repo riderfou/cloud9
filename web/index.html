@@ -70,13 +70,13 @@
 
   <section class="controls">
     <div class="toggles">
-      <label><input type="checkbox" id="t-obs"> Nuages observés (satellite)</label>
+      <label><input type="checkbox" id="t-obs" checked> Nuages observés (satellite)</label>
       <label><input type="checkbox" id="t-sea" checked> Nappe simulée</label>
       <div class="nappe-ctrl" id="nappe-ctrl">
         <label for="h-slider" class="row-label">Altitude de la nappe affichée <strong id="h-val">—</strong></label>
         <input type="range" id="h-slider" min="200" max="3000" step="10">
         <div class="row-buttons">
-          <button id="btn-reset" type="button">Revenir à l'estimation</button>
+          <button id="btn-reset" type="button" disabled>Revenir à la simulation</button>
         </div>
       </div>
       <label id="lbl-cells"><input type="checkbox" id="t-cells"> Altitudes mesurées (maille de 5 km)</label>
