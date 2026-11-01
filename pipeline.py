@@ -217,14 +217,19 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
 NIVEAUX = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600]
 
 
-def sommet_arome(z, rh, t, seuil=80.0):
+def sommet_arome(z, rh, t, seuil=80.0, base_max=2000.0):
     """Sommet de la couche humide de basse couche : altitude où l'humidité relative repasse sous `seuil`
-    en montant. None si la basse couche n'est pas humide ou si l'humidité monte trop haut (couvert)."""
+    en montant, au-dessus de la première couche humide trouvée sous `base_max`. La base peut être au-dessus
+    du fond de vallée (stratus décollé, fond de vallée asséché l'après-midi). None s'il n'y a pas de couche
+    humide en basse couche, ou si l'humidité reste élevée trop haut (couvert, pas une mer de nuages)."""
     ok = [k for k in range(len(z)) if z[k] is not None and rh[k] is not None and z[k] > 230]
-    z = [z[k] for k in ok]; rh = [rh[k] for k in ok]; t = [t[k] for k in ok]
-    if len(z) < 3 or rh[0] < seuil:
+    z = [z[k] for k in ok]; rh = [rh[k] for k in ok]
+    if len(z) < 3:
         return None
-    for k in range(1, len(z)):
+    base = next((k for k in range(len(z)) if rh[k] >= seuil and z[k] < base_max), None)
+    if base is None:
+        return None
+    for k in range(base + 1, len(z)):
         if rh[k] < seuil:
             h = z[k - 1] + (rh[k - 1] - seuil) / (rh[k - 1] - rh[k]) * (z[k] - z[k - 1])
             return round(h) if h < 3000 else None
