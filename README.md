@@ -89,8 +89,12 @@ des images Meteosat MTG de jour : neige = brillante dans le visible (0,6 µm) et
 nuage d'eau = brillant dans les deux, laissé inconnu. La fraction enneigée d'un pixel de 500 m est posée sur la partie la
 plus haute du relief qu'il couvre. Composite `web/data/neige.png` : dernière observation sans nuage de chaque point, images
 à ± 2 h 30 du midi solaire, maximum du jour. 31/10-01/11/2026 : environ 50-65 km² enneigés (glaciers des Grandes Rousses et
-des Écrins), limite d'enneigement vers 3 100-3 400 m. Piste : la fraction enneigée Sentinel-2 à 20 m de Theia (LIS FSC)
-comme base, mise à jour par Meteosat entre deux passages.
+des Écrins), limite d'enneigement vers 3 100-3 400 m. S'y ajoute la fraction enneigée Sentinel-2 à 20 m de Theia
+(LIS FSC, collection `LIS_FSC_PREOP` sur hydroweb.next, clé `HYDROWEB_API_KEY`, étape `pipeline.py lis` au plus toutes
+les 6 h). Elle est moyennée à 100 m ; nuages (205) et zones sans donnée (255) sont ignorés, ainsi que les fichiers
+`-QCFLAGS`. Fusion point par point : l'observation la plus récente l'emporte ; le même jour, LIS est prioritaire sur
+Meteosat. La source de chaque point est dans le canal alpha de `neige.png` (255 LIS, 254 Meteosat, 253 aucune).
+Au 01/11/2026 : 20 produits LIS (22-29/10), qui renseignent 7 % de la zone restée sous la mer de nuages pour Meteosat.
 
 ## Situation : mer de nuages ou pas ? (`situation.py`)
 
