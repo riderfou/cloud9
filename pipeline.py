@@ -273,8 +273,18 @@ def run_obs_mf(jours=7):
         print("Obs MF : MF_OBS_API_KEY absente, étape ignorée"); return
     dst = os.path.join(OUT, "obs_mf.json")
     base = json.load(open(dst)) if os.path.exists(dst) else {"stations": {}, "mesures": {}}
+    # version de l'API : la clé n'est abonnée qu'à certaines (403 « Resource forbidden » sinon)
+    version = None
+    for v in ("v2", "v1"):
+        for chemin in (f"DPObs/{v}/liste-stations", f"DPPaquetObs/{v}/paquet/horaire?id-departement=38&format=json"):
+            r = _mf_get(chemin, key)
+            print(f"Obs MF : essai {chemin} -> {r.status_code} {r.text[:120] if not r.ok else ''}")
+            if r.ok and version is None:
+                version = v
+    if version is None:
+        print("Obs MF : aucune version accessible avec cette clé"); return
     noms = {}
-    r = _mf_get("DPObs/v1/liste-stations", key)
+    r = _mf_get(f"DPObs/{version}/liste-stations", key)
     print("Obs MF : liste-stations", r.status_code, r.headers.get("content-type"), r.text[:200].replace("\n", " | "))
     if r.ok and "json" not in (r.headers.get("content-type") or ""):
         import csv, io
@@ -284,7 +294,7 @@ def run_obs_mf(jours=7):
     dem = m2n.load_dem()
     n_new = 0
     for d in DEPTS_MF:
-        r = _mf_get("DPPaquetObs/v1/paquet/horaire", key, **{"id-departement": d, "format": "json"})
+        r = _mf_get(f"DPPaquetObs/{version}/paquet/horaire", key, **{"id-departement": d, "format": "json"})
         print(f"Obs MF : paquet horaire {d}", r.status_code, r.headers.get("content-type"), (r.text[:300] if not r.ok else ""))
         if not r.ok:
             continue
