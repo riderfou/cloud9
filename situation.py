@@ -72,7 +72,7 @@ def classer_image(m, detectee, h):
 SEUILS_AIR = {
     "gradient_stable": 4.0,      # °C/km entre la vallée et ~2 000 m : <= 4 -> stable
     "gradient_instable": 6.0,    # >= 6 -> instable (proche de l'adiabatique humide)
-    "vent_limite": 25.0,         # km/h à 850 hPa (~1 500 m)
+    "vent_limite": 25.0,         # km/h à 850 hPa (~1 500 m), pris en compte seulement si l'air n'est pas stable
     "vent_fort": 40.0,
     "pluie": 0.3,                # mm/h
 }
@@ -102,7 +102,11 @@ def masse_air(profil, vent850=None, dir850=None, vent700=None, pluie=None):
             score = 2; raisons.append("air instable")
         elif g > s["gradient_stable"] and not out["inversion"]:
             score = max(score, 1); raisons.append("air peu stable")
-    if vent850 is not None:
+    # Le vent ne disloque la nappe que si l'air n'est pas stable : au-dessus d'une inversion, même soutenu
+    # (27-41 km/h de nord-est la nuit du 31/10 au 01/11), il laisse la mer de nuages intacte.
+    stable = bool(out["inversion"]) or (g is not None and g <= s["gradient_stable"])
+    out["air_stable"] = stable
+    if vent850 is not None and not stable:
         de = f" de {direction(dir850)}" if dir850 is not None else ""
         de = de.replace("de est", "d'est").replace("de ouest", "d'ouest").replace("de nord", "du nord").replace("de sud", "du sud")
         if vent850 >= s["vent_fort"]:

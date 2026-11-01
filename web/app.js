@@ -328,7 +328,8 @@ function detailsAir(air) {
   if (!det.length) {
     if (air.inversion) det.push(`inversion vers ${nf.format(air.inversion.base_m)}-${nf.format(air.inversion.sommet_m)} m`);
     else if (air.gradient_c_km != null) det.push("air stable");
-    if (air.vent850_kmh != null) det.push(`vent faible (${Math.round(air.vent850_kmh)} km/h)`);
+    if (air.vent850_kmh != null) det.push(air.vent850_kmh < 25 ? `vent faible (${Math.round(air.vent850_kmh)} km/h)`
+      : `vent de ${Math.round(air.vent850_kmh)} km/h à 1 500 m, sans effet sous l'inversion`);
   }
   return det.join(", ");
 }
