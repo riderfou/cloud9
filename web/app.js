@@ -54,6 +54,8 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 40; controls.maxDistance = 900;
+// clic gauche pour déplacer, clic droit pour tourner
+controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
 
 scene.add(new THREE.HemisphereLight(0xdfeeff, 0x4a4030, 1.1));
 const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);   // soleil de fin d'automne, plein sud, bas
