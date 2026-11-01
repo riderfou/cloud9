@@ -256,7 +256,6 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
 
 # ------------------------------------------------------------------ observations Météo-France
 MF = "https://public-api.meteofrance.fr/public"
-DEPTS_MF = ("38", "73")
 
 
 def _mf_get(chemin, key, **params):
@@ -264,69 +263,85 @@ def _mf_get(chemin, key, **params):
     return r
 
 
-def run_obs_mf(jours=7):
-    """Observations horaires des stations Météo-France de la zone (Isère, Savoie) -> obs_mf.json.
-    Le paquet horaire couvre les dernières 24 h : on cumule à chaque passage et on garde `jours` jours.
-    Altitude prise sur le MNT à la position de la station (cohérente avec le reste de l'analyse)."""
+def run_obs_mf(jours=7, max_requetes=280):
+    """Observations horaires des stations Météo-France de la zone (API DPObs v2, station par station) -> obs_mf.json.
+    À chaque passage : dernière observation de chaque station, plus les heures manquantes des dernières 24 h
+    (rattrapage), dans la limite de `max_requetes` (quota de l'API : ~50 requêtes / min). Historique : `jours` jours."""
+    import csv, io, time
     key = os.environ.get("MF_OBS_API_KEY")
     if not key:
         print("Obs MF : MF_OBS_API_KEY absente, étape ignorée"); return
     dst = os.path.join(OUT, "obs_mf.json")
     base = json.load(open(dst)) if os.path.exists(dst) else {"stations": {}, "mesures": {}}
-    # version de l'API : la clé n'est abonnée qu'à certaines (403 « Resource forbidden » sinon)
-    version = None
-    for v in ("v2", "v1"):
-        for chemin in (f"DPObs/{v}/liste-stations", f"DPPaquetObs/{v}/paquet/horaire?id-departement=38&format=json"):
-            r = _mf_get(chemin, key)
-            print(f"Obs MF : essai {chemin} -> {r.status_code} {r.text[:120] if not r.ok else ''}")
-            if r.ok and version is None:
-                version = v
-    if version is None:
-        print("Obs MF : aucune version accessible avec cette clé"); return
-    noms = {}
-    r = _mf_get(f"DPObs/{version}/liste-stations", key)
-    print("Obs MF : liste-stations", r.status_code, r.headers.get("content-type"), r.text[:200].replace("\n", " | "))
-    if r.ok and "json" not in (r.headers.get("content-type") or ""):
-        import csv, io
-        for row in csv.DictReader(io.StringIO(r.text), delimiter=";"):
-            k = {c.lower(): v for c, v in row.items() if c}
-            if k.get("id_station"): noms[k["id_station"]] = k.get("nom_usuel") or k.get("nom")
-    dem = m2n.load_dem()
-    n_new = 0
-    for d in DEPTS_MF:
-        r = _mf_get(f"DPPaquetObs/{version}/paquet/horaire", key, **{"id-departement": d, "format": "json"})
-        print(f"Obs MF : paquet horaire {d}", r.status_code, r.headers.get("content-type"), (r.text[:300] if not r.ok else ""))
-        if not r.ok:
+    r = _mf_get("DPObs/v2/liste-stations", key)
+    if not r.ok:
+        print("Obs MF : liste-stations", r.status_code, r.text[:200]); return
+    for row in csv.DictReader(io.StringIO(r.text), delimiter=";"):
+        try:
+            la, lo = float(row["Latitude"]), float(row["Longitude"])
+        except (KeyError, ValueError):
             continue
-        lignes = r.json()
-        if lignes:
-            print("Obs MF : champs", sorted(lignes[0]))
-        for o in lignes:
-            sid, la, lo = str(o.get("geo_id_insee")), o.get("lat"), o.get("lon")
-            if la is None or lo is None:
-                continue
-            if sid not in base["stations"]:
-                x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
-                j, i = int((x - m2n.AOI[0]) / m2n.RES), int((m2n.AOI[3] - y) / m2n.RES)
-                if not (0 <= i < m2n.H and 0 <= j < m2n.W) or not np.isfinite(dem[i, j]):
-                    continue
-                base["stations"][sid] = {"id": sid, "nom": noms.get(sid, sid), "lat": la, "lon": lo,
-                                         "x": round(x, 1), "y": round(y, 1), "alt": round(float(dem[i, j]))}
-            k = lambda c: o.get(c)
-            t = k("t"); td = k("td")
-            m = {"t": k("validity_time"), "T": None if t is None else round(t - 273.15, 1),
-                 "Td": None if td is None else round(td - 273.15, 1), "U": k("u"), "vv": k("vv"),
-                 "n": k("n"), "ff": k("ff"), "dd": k("dd"), "rr1": k("rr1"), "insolh": k("insolh")}
-            serie = base["mesures"].setdefault(sid, [])
-            if m["t"] and all(x["t"] != m["t"] for x in serie):
-                serie.append(m); n_new += 1
-    limite = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=jours)).isoformat()
+        x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
+        if m2n.AOI[0] <= x <= m2n.AOI[2] and m2n.AOI[1] <= y <= m2n.AOI[3]:
+            sid = row["Id_station"]
+            base["stations"][sid] = {"id": sid, "nom": row.get("Nom_usuel", sid).title(), "lat": la, "lon": lo,
+                                     "x": round(x, 1), "y": round(y, 1), "alt": int(float(row.get("Altitude") or 0)),
+                                     "pack": row.get("Pack")}
+    print(f"Obs MF : {len(base['stations'])} stations dans la zone")
+    n_req, t_req = 0, [0.0]
+
+    def appel(sid, quand=None):
+        nonlocal n_req
+        attente = 1.3 - (time.time() - t_req[0])
+        if attente > 0: time.sleep(attente)
+        t_req[0] = time.time(); n_req += 1
+        p = {"id_station": sid, "format": "json"}
+        if quand: p["date"] = quand.strftime("%Y-%m-%dT%H:00:00Z")
+        return _mf_get("DPObs/v2/station/horaire", key, **p)
+
+    def ajouter(sid, lignes):
+        serie = base["mesures"].setdefault(sid, []); deja = {x["t"] for x in serie}; n = 0
+        for o in (lignes if isinstance(lignes, list) else [lignes]):
+            t = o.get("validity_time")
+            if not t or t in deja: continue
+            T, Td = o.get("t"), o.get("td")
+            serie.append({"t": t, "T": None if T is None else round(T - 273.15, 1), "Td": None if Td is None else round(Td - 273.15, 1),
+                          "U": o.get("u"), "vv": o.get("vv"), "n": o.get("n"), "ff": o.get("ff"), "dd": o.get("dd"),
+                          "rr1": o.get("rr1"), "insolh": o.get("insolh")})
+            deja.add(t); n += 1
+        return n
+
+    n_new, maintenant = 0, dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    premier = True
+    for sid in sorted(base["stations"]):
+        r = appel(sid)
+        if premier:
+            print(f"Obs MF : station/horaire {sid} -> {r.status_code} {r.headers.get('content-type')} {r.text[:300]}")
+            premier = False
+        if not r.ok:
+            if r.status_code in (401, 403, 404): print(f"Obs MF : {sid} {r.status_code}"); continue
+            continue
+        try: n_new += ajouter(sid, r.json())
+        except ValueError: pass
+    # rattrapage des heures manquantes (24 h), les plus récentes d'abord
+    for h in range(1, 25):
+        quand = maintenant - dt.timedelta(hours=h); cle = quand.strftime("%Y-%m-%dT%H:00:00")
+        for sid in sorted(base["stations"]):
+            if n_req >= max_requetes: break
+            if any(x["t"].startswith(cle) for x in base["mesures"].get(sid, [])): continue
+            r = appel(sid, quand)
+            if r.ok:
+                try: n_new += ajouter(sid, r.json())
+                except ValueError: pass
+        if n_req >= max_requetes:
+            print(f"Obs MF : limite de {max_requetes} requêtes atteinte, rattrapage poursuivi au prochain passage"); break
+    limite = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=jours)).strftime("%Y-%m-%dT%H:%M:%S")
     for sid in list(base["mesures"]):
-        base["mesures"][sid] = sorted((x for x in base["mesures"][sid] if x["t"] >= limite[:19]), key=lambda x: x["t"])
+        base["mesures"][sid] = sorted((x for x in base["mesures"][sid] if x["t"] >= limite), key=lambda x: x["t"])
     base["maj_utc"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")
-    base["source"] = "Météo-France, données publiques d'observation"
+    base["source"] = "Météo-France, données publiques d'observation (DPObs v2)"
     write_json("obs_mf.json", base)
-    print(f"Obs MF OK : {len(base['stations'])} stations dans la zone, {n_new} nouvelles mesures")
+    print(f"Obs MF OK : {len(base['stations'])} stations, {n_new} nouvelles mesures, {n_req} requêtes")
 
 
 # ------------------------------------------------------------------ webcams (Windy)
