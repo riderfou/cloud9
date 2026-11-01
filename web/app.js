@@ -19,6 +19,8 @@ let [meta, hist, arome, lieux, reliefImg] = await Promise.all([
   getJSON("data/meta.json"), getJSON("data/historique.json"), getJSON("data/arome.json").catch(() => null),
   getJSON("data/sommets.json"), loadImage("data/relief.png"),
 ]);
+// lieux secondaires (OpenStreetMap) : affichés après la liste choisie, quand la place le permet
+const lieuxOSM = await getJSON("data/lieux.json").then((d) => d.lieux || []).catch(() => []);
 const webcams = await getJSON("data/webcams.json").then((d) => d.webcams || []).catch(() => []);
 const [GW, GH] = meta.grille_web;
 const [X0, Y0, X1, Y1] = meta.aoi;
@@ -45,7 +47,8 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 host.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xb8d3ec, 450, 1300);
+// brume légère, repoussée quand on dézoome (voir majBrume) pour que la carte reste lisible en vue d'ensemble
+scene.fog = new THREE.Fog(0xb8d3ec, 560, 1600);
 const camera = new THREE.PerspectiveCamera(45, 1, 1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -306,7 +309,9 @@ function addLabel(html, cls, x, y, z) {
   const el = document.createElement("div"); el.className = "lbl " + cls; el.innerHTML = html;
   labelsEl.appendChild(el); const L = { el, x, y, z, cls }; labels.push(L); return L;
 }
-const peakLabels = lieux.map((s) => ({ s, L: addLabel("", "", s.x, s.y, s.alt_mnt) }));
+const peakLabels = [...lieux.map((s) => ({ ...s, rang: 1 })), ...lieuxOSM.map((s) => ({ ...s, rang: 2 }))]
+  .map((s) => { const L = addLabel("", "", s.x, s.y, s.alt_mnt); L.rang = s.rang; return { s, L }; });
+const altLieu = (s) => s.alt ?? Math.round(zAt(s.x, s.y));
 let cellLabels = [];
 function statusOf(alt) {
   const tol = Math.max(60, state.sigma || 0);
@@ -381,14 +386,16 @@ $("cam-dialog").addEventListener("click", (e) => { if (e.target === $("cam-dialo
 
 function renderPeaks() {
   for (const { s, L } of peakLabels) {
-    const st = statusOf(s.alt);
-    L.el.className = "lbl " + (!sea.visible ? "" : st === "dessous" ? "dessous" : st === "bord" ? "bord" : "");
-    L.el.innerHTML = `${s.nom} <small>${nf.format(s.alt)} m</small>`;
+    const alt = altLieu(s), st = statusOf(alt);
+    L.el.className = "lbl " + (!sea.visible ? "" : st === "dessous" ? "dessous" : st === "bord" ? "bord" : "")
+      + (s.rang > 1 ? " r2" : "") + (s.type === "col" ? " col" : "");
+    const html = `${s.nom} <small>${nf.format(alt)} m</small>`;
+    if (L.html !== html) { L.el.innerHTML = L.html = html; L.w = 0; }   // taille à remesurer
   }
   renderWebcams();
   const ul = $("peaks"); ul.replaceChildren();
   $("peaks-note").hidden = sea.visible;
-  for (const s of [...lieux].sort((a, b) => b.alt - a.alt)) {
+  for (const s of [...lieux].sort((a, b) => b.alt - a.alt)) {   // liste : sélection principale seulement
     const st = statusOf(s.alt), li = document.createElement("li");
     if (!sea.visible) { const n = document.createElement("span"); n.textContent = s.nom;
       const al = document.createElement("span"); al.className = "alt"; al.textContent = `${nf.format(s.alt)} m`;
@@ -406,15 +413,28 @@ function setCells(mailles) {
   cellLabels.forEach((L) => (L.el.style.display = $("t-cells").checked ? "" : "none"));
 }
 const v = new THREE.Vector3();
+// Placement sans chevauchement : mailles et webcams d'abord (toujours affichées), puis les noms par priorité :
+// la liste choisie (qui passe par-dessus les pastilles), puis villes, sommets du plus haut au plus bas, cols,
+// villages. En zoomant, la place libérée fait apparaître les noms de second rang.
+const occPastilles = [], occNoms = [];
+const chevauche = (occ, x0, y0, x1, y1) => occ.some((b) => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1]);
 function updateLabels() {
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
   const showPeaks = $("t-labels").checked, showCells = $("t-cells").checked, showCams = $("t-cams").checked;
-  for (const L of labels) {
+  occPastilles.length = 0; occNoms.length = 0;
+  for (const passe of [0, 1, 2]) for (const L of labels) {
     const isCell = L.cls === "cell", isCam = L.cls.startsWith("cam");
+    if (passe !== (isCell || isCam ? 0 : L.rang > 1 ? 2 : 1)) continue;
     if ((isCell && !showCells) || (isCam && !showCams) || (!isCell && !isCam && !showPeaks)) { L.el.style.display = "none"; continue; }
     v.copy(toWorld(L.x, L.y, isCell ? L.z : zAt(L.x, L.y) + (isCam ? 0 : 30))).project(camera);
     if (v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) { L.el.style.display = "none"; continue; }
-    L.el.style.display = ""; L.el.style.left = `${(v.x * .5 + .5) * w}px`; L.el.style.top = `${(-v.y * .5 + .5) * h}px`;
+    const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+    if (!L.w) { L.el.style.display = ""; L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
+    // boîte à l'écran (étiquette au-dessus du point, pastille de webcam en dessous), avec 3 px de marge
+    const y0 = isCam ? sy + 3 : sy - L.h - 6, b = [sx - L.w / 2 - 3, y0 - 3, sx + L.w / 2 + 3, y0 + L.h + 3];
+    if (passe > 0 && (chevauche(occNoms, ...b) || (passe === 2 && chevauche(occPastilles, ...b)))) { L.el.style.display = "none"; continue; }
+    (passe === 0 ? occPastilles : occNoms).push(b);
+    L.el.style.display = ""; L.el.style.left = `${sx}px`; L.el.style.top = `${sy}px`;
   }
 }
 
@@ -811,6 +831,10 @@ $("btn-zoom-in").addEventListener("click", () => zoomer(0.7));
 $("btn-zoom-out").addEventListener("click", () => zoomer(1 / 0.7));
 const boussole = $("boussole");
 let angleAffiche = null;
+function majBrume() {
+  const d = camera.position.distanceTo(controls.target);
+  scene.fog.near = d + 250; scene.fog.far = d * 1.6 + 1100;
+}
 function majBoussole() {
   off.copy(camera.position).sub(controls.target);
   const a = Math.round(THREE.MathUtils.radToDeg(Math.atan2(off.x, off.z)) * 10) / 10;
@@ -827,5 +851,5 @@ renderer.setAnimationLoop(() => {
   if (ventLignes.visible && document.visibilityState === "visible") ventAvancer(dt);
   seaMat.uniforms.uTime.value = clock.getElapsedTime();
   avancerAnimation();
-  controls.update(); renderer.render(scene, camera); updateLabels(); majBoussole();
+  controls.update(); renderer.render(scene, camera); updateLabels(); majBoussole(); majBrume();
 });

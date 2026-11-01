@@ -85,6 +85,10 @@ body { display: flex; background: #9cc3e6; }
 .lbl.dessous { background: rgba(225,232,240,.72); color: #4a5563; }
 .lbl.dessous small { color: #6b7684; }
 .lbl.bord { background: rgba(255,244,214,.92); }
+.lbl:not(.cam) { z-index: 1; }   /* les noms passent devant les pastilles de webcam */
+.lbl.r2 { font-size: 11px; padding: 1px 5px; background: rgba(255,255,255,.78); }
+.lbl.r2.dessous { background: rgba(225,232,240,.62); }
+.lbl.col { font-style: italic; }
 .lbl.cell { background: rgba(235,104,52,.92); color: #fff; font-weight: 600; font-size: 11px; }
 .lbl.cell::after { background: rgba(235,104,52,.9); }
 

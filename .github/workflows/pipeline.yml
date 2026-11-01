@@ -43,6 +43,7 @@ jobs:
           HYDROWEB_API_KEY: ${{ secrets.HYDROWEB_API_KEY }}
         run: |
           [ -f web/data/relief.png ] || python3 pipeline.py statique
+          [ -f web/data/lieux.json ] || python3 pipeline.py lieux || true
           H=$(date -u +%H)
           python3 pipeline.py mtg || true
           if [ "$H" -ge 11 ] && [ "$H" -le 16 ]; then

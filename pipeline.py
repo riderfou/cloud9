@@ -7,12 +7,13 @@ Pipeline mer2nuages : produit les données de la webapp dans web/data/.
   python3 pipeline.py mtg [AAAA-MM-JJ]    # Meteosat MTG toutes les 30 min, visible le jour, infrarouge la nuit
                                           # (sans date : 6 dernières heures ; avec date : la journée UTC entière)
   python3 pipeline.py arome               # prévision AROME (Open-Meteo)
+  python3 pipeline.py lieux               # sommets, cols, localités OpenStreetMap (une fois)
   python3 pipeline.py vent                # champ de vent AROME sur la zone (animation de la webapp)
   python3 pipeline.py tout                # viirs du jour + s2 + arome + index
 
 À lancer toutes les 30 min entre 11 h et 15 h UTC (VIIRS) et toutes les 3 h (AROME).
 """
-import sys, os, json, glob, shutil, datetime as dt, re
+import sys, os, json, glob, shutil, math, datetime as dt, re
 import numpy as np, requests
 from PIL import Image
 from scipy import ndimage
@@ -122,6 +123,80 @@ def statique():
     write_json("meta.json", {"crs": m2n.CRS, "aoi": m2n.AOI, "grille_web": [GW, GH], "pas_m": m2n.RES * STEP,
                              "texture": {"scene": scene}, "relief": "Copernicus DEM GLO-30"})
     print("statique OK", GW, GH, len(out), "lieux")
+
+
+# ------------------------------------------------------------------ lieux secondaires (OpenStreetMap)
+OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+
+
+def _ele(t):
+    m = re.match(r"\s*(\d{2,4})(?:[.,]\d+)?\s*(?:m)?\s*$", t.get("ele", ""))
+    return int(m.group(1)) if m else None
+
+
+def run_lieux_osm():
+    """Sommets, cols et localités OpenStreetMap complétant la liste choisie (SOMMETS) : web/data/lieux.json.
+    Une seule requête Overpass ; le site les affiche en second rang, quand la place le permet."""
+    x0, y0, x1, y1 = m2n.AOI
+    lo, la = wtransform(m2n.CRS, "EPSG:4326", [x0, x1, x0, x1], [y0, y0, y1, y1])
+    bb = f"{min(la):.4f},{min(lo):.4f},{max(la):.4f},{max(lo):.4f}"
+    q = f"""[out:json][timeout:180];
+(node["natural"="peak"]["name"]["ele"]({bb});
+ node["natural"="saddle"]["name"]({bb}); node["mountain_pass"="yes"]["name"]({bb});
+ node["place"~"^(city|town|village)$"]["name"]({bb}););
+out;"""
+    el = None
+    for url in OVERPASS:
+        try:
+            r = requests.post(url, data={"data": q}, timeout=240, headers={"User-Agent": "mer2nuages (github.com/riderfou/cloud9)"})
+            r.raise_for_status(); el = r.json()["elements"]; break
+        except Exception as e:
+            print("  overpass", url, e)
+    if el is None:
+        raise RuntimeError("Overpass indisponible")
+    xs, ys = wtransform("EPSG:4326", m2n.CRS, [e["lon"] for e in el], [e["lat"] for e in el])
+    pts = []
+    for e, x, y in zip(el, xs, ys):
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            continue
+        t = e.get("tags", {})
+        typ = ("sommet" if t.get("natural") == "peak" else "col" if t.get("natural") == "saddle" or t.get("mountain_pass") == "yes"
+               else t.get("place"))
+        pts.append({"nom": t["name"], "type": typ, "alt": _ele(t), "x": round(x), "y": round(y),
+                    "pop": int(t["population"]) if t.get("population", "").isdigit() else 0})
+    choisis = json.load(open(os.path.join(OUT, "sommets.json")))
+    norm = lambda s: re.sub(r"[\W_]", "", s.lower())
+    meme_nom = lambda a, b: a == b or (min(len(a), len(b)) >= 5 and (a.startswith(b) or b.startswith(a)))
+    choisis = [(norm(s["nom"]), s["x"], s["y"]) for s in choisis]
+    pris = []   # déjà retenus, toutes catégories
+
+    def garder(cands, d_iso, d_choisi, n_max):
+        out = []
+        for p in cands:
+            n = norm(p["nom"])
+            if any(meme_nom(n, c) or math.hypot(p["x"] - x, p["y"] - y) < d_choisi for c, x, y in choisis):
+                continue   # déjà dans la liste choisie
+            if any(meme_nom(n, c) and math.hypot(p["x"] - x, p["y"] - y) < 5000 or math.hypot(p["x"] - x, p["y"] - y) < 300
+                   for c, x, y in pris):
+                continue   # doublon d'une autre catégorie
+            # un seul nom par voisinage (le plus haut / le plus peuplé, qui vient en premier)
+            if all(math.hypot(p["x"] - o["x"], p["y"] - o["y"]) > d_iso for o in out):
+                out.append(p)
+            if len(out) >= n_max:
+                break
+        pris.extend((norm(p["nom"]), p["x"], p["y"]) for p in out)
+        return out
+
+    sommets = garder(sorted([p for p in pts if p["type"] == "sommet" and p["alt"]], key=lambda p: -p["alt"]), 1200, 500, 300)
+    villes = garder(sorted([p for p in pts if p["type"] in ("city", "town")], key=lambda p: -p["pop"]), 1500, 1000, 60)
+    cols = garder(sorted([p for p in pts if p["type"] == "col"], key=lambda p: -(p["alt"] or 0)), 1500, 500, 100)
+    villages = garder(sorted([p for p in pts if p["type"] == "village"], key=lambda p: -p["pop"]), 1500, 1000, 250)
+    out = []
+    for p in villes + sommets + cols + villages:   # ordre = priorité d'affichage
+        p = dict(p, type="lieu" if p["type"] in ("city", "town", "village") else p["type"]); p.pop("pop")
+        out.append(p)
+    write_json("lieux.json", {"source": "© contributeurs OpenStreetMap (ODbL)", "lieux": out})
+    print("lieux OSM OK", len(villes), "villes,", len(sommets), "sommets,", len(cols), "cols,", len(villages), "villages")
 
 
 # ------------------------------------------------------------------ analyses
@@ -706,6 +781,7 @@ if __name__ == "__main__":
     elif cmd == "webcams-corrections": run_webcams(age_max_h=10 ** 6)   # réapplique les corrections sans requête
     elif cmd == "obs": run_obs_mf()
     elif cmd == "lis": run_lis(forcer="--forcer" in sys.argv)
+    elif cmd == "lieux": run_lieux_osm()
     elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
         reclasser()
         a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)
