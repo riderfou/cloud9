@@ -359,21 +359,60 @@ def run_obs_mf(jours=7, max_requetes=280):
 WINDY = "https://api.windy.com/webcams/api/v3/webcams"
 
 
+CORRECTIONS_WEBCAMS = os.path.join(ROOT, "webcams_corrections.json")
+
+
+def corriger_webcams(cams):
+    """Applique webcams_corrections.json : beaucoup de webcams de stations sont déclarées dans Windy à la
+    position du village, pas de la caméra. Par identifiant Windy : "alt" (m) et/ou "lat"/"lon" corrigés.
+    Champs produits : x, y, lat, lon, alt_mnt (relief à la position retenue), alt (altitude retenue), corrige."""
+    try:
+        table = {k: v for k, v in json.load(open(CORRECTIONS_WEBCAMS)).items() if not k.startswith("_")}
+    except FileNotFoundError:
+        table = {}
+    dem = m2n.load_dem()
+    out = []
+    for c in cams:
+        c = dict(c)
+        la, lo = c.get("lat_windy", c.get("lat")), c.get("lon_windy", c.get("lon"))
+        c["lat_windy"], c["lon_windy"] = la, lo
+        corr = table.get(str(c["id"])) or {}
+        if "lat" in corr and "lon" in corr:
+            la, lo = corr["lat"], corr["lon"]
+        x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
+        j, i = int((x - m2n.AOI[0]) / m2n.RES), int((m2n.AOI[3] - y) / m2n.RES)
+        if not (0 <= i < m2n.H and 0 <= j < m2n.W) or not np.isfinite(dem[i, j]):
+            continue
+        c.update({"lat": la, "lon": lo, "x": round(x, 1), "y": round(y, 1), "alt_mnt": round(float(dem[i, j]))})
+        c["alt"] = int(corr["alt"]) if "alt" in corr else c["alt_mnt"]
+        c["corrige"] = {k: corr[k] for k in ("alt", "lat", "lon", "note") if k in corr} or None
+        out.append(c)
+    n = sum(1 for c in out if c["corrige"])
+    if table:
+        print(f"Webcams : {n} corrigée(s) sur {len(table)} correction(s) dans {os.path.basename(CORRECTIONS_WEBCAMS)}")
+    return sorted(out, key=lambda c: -c["alt"])
+
+
 def run_webcams(lat=45.27, lon=5.94, rayon_km=60, age_max_h=12):
     """Liste des webcams Windy dans la zone -> webcams.json (position, altitude MNT, lecteur intégrable).
     Les URL d'images de l'offre gratuite expirent au bout de quelques minutes : on ne garde que le
     lecteur Windy (iframe public, sans clé) et le lien vers la page de la webcam."""
-    key = os.environ.get("WINDY_WEBCAMS_API_KEY")
-    if not key:
-        print("Webcams : WINDY_WEBCAMS_API_KEY absente, étape ignorée"); return
     dst = os.path.join(OUT, "webcams.json")
+    key = os.environ.get("WINDY_WEBCAMS_API_KEY")
+    recente = False
     if os.path.exists(dst):
         try:
             maj = dt.datetime.fromisoformat(json.load(open(dst))["maj_utc"])
-            if dt.datetime.now(dt.timezone.utc) - maj < dt.timedelta(hours=age_max_h):
-                print("Webcams : liste récente, pas de nouvelle requête"); return
+            recente = dt.datetime.now(dt.timezone.utc) - maj < dt.timedelta(hours=age_max_h)
         except Exception:
             pass
+    if recente or not key:
+        # pas de nouvelle requête : on réapplique seulement les corrections (fichier peut-être modifié)
+        if os.path.exists(dst):
+            d = json.load(open(dst))
+            d["webcams"] = corriger_webcams(d["webcams"])
+            write_json("webcams.json", d)
+        print("Webcams :", "liste récente" if recente else "WINDY_WEBCAMS_API_KEY absente", "- corrections réappliquées"); return
     brut, offset = [], 0
     while True:
         r = requests.get(WINDY, headers={"x-windy-api-key": key}, timeout=60, params={
@@ -408,10 +447,10 @@ def run_webcams(lat=45.27, lon=5.94, rayon_km=60, age_max_h=12):
         urls = w.get("urls") or {}
         wid = w.get("webcamId", w.get("id"))
         out.append({"id": wid, "titre": w.get("title", ""), "ville": loc.get("city"),
-                    "x": round(x, 1), "y": round(y, 1), "lat": la, "lon": lo, "alt_mnt": round(float(dem[i, j])),
+                    "x": round(x, 1), "y": round(y, 1), "lat_windy": la, "lon_windy": lo, "alt_mnt": round(float(dem[i, j])),
                     "lecteur": lecteur, "lien": urls.get("detail") or (f"https://www.windy.com/webcams/{wid}" if wid else None),
                     "maj": w.get("lastUpdatedOn")})
-    out.sort(key=lambda c: -c["alt_mnt"])
+    out = corriger_webcams(out)
     write_json("webcams.json", {"source": "Windy.com Webcams", "maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
                                 "webcams": out})
     print(f"Webcams OK : {len(out)} dans la zone (sur {len(brut)} à moins de {rayon_km} km)")
@@ -520,6 +559,7 @@ if __name__ == "__main__":
             run_mtg()
     elif cmd == "arome": run_arome()
     elif cmd == "webcams": run_webcams(age_max_h=0)
+    elif cmd == "webcams-corrections": run_webcams(age_max_h=10 ** 6)   # réapplique les corrections sans requête
     elif cmd == "obs": run_obs_mf()
     elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
         reclasser()

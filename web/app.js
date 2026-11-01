@@ -169,11 +169,13 @@ function statusOf(alt) {
 const ST_TXT = { dessus: "au-dessus", bord: "au niveau du bord", dessous: "dans / sous la mer" };
 // ------------------------------------------------------------------ webcams (Windy)
 const ICONE_CAM = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+// altitude retenue (corrigée si besoin, voir webcams_corrections.json), sinon relief à la position Windy
+const altCam = (c) => c.alt ?? c.alt_mnt;
 // webcams au même endroit (< 150 m) : une seule pastille, avec leur nombre
 const groupesCam = [];
 for (const c of webcams) {
   const g = groupesCam.find((g) => Math.hypot(g.x - c.x, g.y - c.y) < 150);
-  if (g) g.cams.push(c); else groupesCam.push({ x: c.x, y: c.y, alt: c.alt_mnt, cams: [c] });
+  if (g) g.cams.push(c); else groupesCam.push({ x: c.x, y: c.y, alt: altCam(c), cams: [c] });
 }
 const camLabels = groupesCam.map((g) => {
   const n = g.cams.length;
@@ -193,10 +195,10 @@ function renderWebcams() {
   const ul = $("cams"); ul.replaceChildren();
   webcams.forEach((c, k) => {
     if (!camsDepliees && k >= CAMS_REPLIEES) return;
-    const li = document.createElement("li"), st = statusOf(c.alt_mnt);
+    const li = document.createElement("li"), st = statusOf(altCam(c));
     const b = document.createElement("button"); b.type = "button"; b.className = "lien-cam"; b.textContent = c.titre;
     b.addEventListener("click", () => ouvrirWebcam(c, (groupesCam.find((g) => g.cams.includes(c)) || { cams: [c] }).cams));
-    const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(c.alt_mnt)} m`;
+    const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(altCam(c))} m`;
     li.append(b, alt);
     if (sea.visible) { const chip = document.createElement("span"); chip.className = "st " + st;
       chip.textContent = (st === "dessus" ? "☀ " : st === "bord" ? "≈ " : "☁ ") + ST_TXT[st]; li.appendChild(chip); }
@@ -210,8 +212,8 @@ $("cams-plus").addEventListener("click", () => { camsDepliees = !camsDepliees; r
 function ouvrirWebcam(c, groupe = [c]) {
   const d = $("cam-dialog");
   $("cam-titre").textContent = c.titre;
-  const st = statusOf(c.alt_mnt);
-  $("cam-info").textContent = `${nf.format(c.alt_mnt)} m${c.ville ? ` · ${c.ville}` : ""}`
+  const st = statusOf(altCam(c));
+  $("cam-info").textContent = `${nf.format(altCam(c))} m${c.corrige ? " (corrigée)" : ""}${c.ville ? ` · ${c.ville}` : ""}`
     + (sea.visible ? ` · ${ST_TXT[st]} de la nappe affichée (${nf.format(state.H)} m)` : "");
   const f = $("cam-player");
   if (c.lecteur) { f.src = c.lecteur; f.hidden = false; } else { f.removeAttribute("src"); f.hidden = true; }

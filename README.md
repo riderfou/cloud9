@@ -13,6 +13,7 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 | `tools/nuit_mtg.py` | Prototype de la méthode de nuit, comparée au visible et aux stations |
 | `tools/calibrage_mtg.py` | Calibrage MTG sur une journée (variantes parallaxe, seuils, filtre de bord) |
 | Webcams Windy | `pipeline.py webcams` : webcams de la zone (API Windy v3, clé `WINDY_WEBCAMS_API_KEY`), placées sur la carte avec leur altitude et un lecteur intégré |
+| `webcams_corrections.json` | Corrections d'altitude ou de position des webcams Windy mal placées (souvent déclarées au centre du village), appliquées à chaque passage |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
 | `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets, webcams, observations Météo-France (`obs_mf.json`, clé `MF_OBS_API_KEY`, API DPObs v2) |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |

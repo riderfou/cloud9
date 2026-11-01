@@ -1,0 +1,12 @@
+{
+ "_lisezmoi": [
+  "Corrections des webcams Windy, appliquées par pipeline.py à chaque passage (python3 pipeline.py webcams-corrections pour les appliquer tout de suite).",
+  "Clé = identifiant Windy de la webcam (dans l'URL https://windy.com/webcams/<id>, ou dans web/data/webcams.json).",
+  "Champs facultatifs : alt (altitude réelle de la caméra, m), lat et lon (position réelle, degrés décimaux, les deux ensemble), note (texte libre).",
+  "Sans alt, l'altitude est lue sur le relief à la position retenue. Les entrées dont la clé commence par _ sont ignorées."
+ ],
+ "_exemple": {
+  "alt": 2950,
+  "note": "Saint-Sorlin-d'Arves : Glacier de l'Étendard, caméra en haut du domaine (à vérifier)"
+ }
+}
