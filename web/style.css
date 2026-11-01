@@ -185,3 +185,26 @@ table.analyses { width: 100%; border-collapse: collapse; font-size: 12px; }
   #panel { width: 100%; height: auto; border-left: 0; }
 }
 .hero-air[hidden] { display: none; }
+
+/* webcams */
+.lbl.cam { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; transform: translate(-50%, 3px);
+  pointer-events: auto; cursor: pointer; background: #2b2b29; color: #fff; box-shadow: 0 1px 4px #0006; }
+.lbl.cam svg { width: 14px; height: 14px; }
+.lbl.cam::after { display: none; }
+.lbl.cam.dessus { background: #e5a50a; color: #1b1b1a; }
+.lbl.cam.dessous { background: rgba(110,124,140,.92); color: #fff; }
+.lbl.cam:hover, .lbl.cam:focus-visible { outline: 2px solid #fff; outline-offset: 1px; z-index: 2; }
+.lien-cam { font: inherit; color: var(--text-primary); background: none; border: 0; padding: 0; text-align: left;
+  cursor: pointer; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.lien-cam:hover { text-decoration-color: currentColor; }
+#cam-dialog { width: min(760px, calc(100vw - 32px)); padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--surface-1); color: var(--text-primary); box-shadow: 0 10px 40px #0005; }
+#cam-dialog::backdrop { background: #0008; }
+.cam-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.cam-tete h3 { margin: 0; font-size: 16px; }
+.cam-tete p { margin: 2px 0 0; font-size: 12px; color: var(--text-secondary); }
+#cam-fermer { font: inherit; font-size: 16px; line-height: 1; background: var(--surface-2); color: var(--text-primary);
+  border: 0; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; flex: none; }
+#cam-player { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 8px; margin-top: 10px; background: var(--surface-2); }
+.cam-pied { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+.cam-pied a { color: var(--series-1); }

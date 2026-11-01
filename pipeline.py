@@ -254,6 +254,68 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
         fait += 1
 
 
+# ------------------------------------------------------------------ webcams (Windy)
+WINDY = "https://api.windy.com/webcams/api/v3/webcams"
+
+
+def run_webcams(lat=45.27, lon=5.94, rayon_km=40, age_max_h=12):
+    """Liste des webcams Windy dans la zone -> webcams.json (position, altitude MNT, lecteur intégrable).
+    Les URL d'images de l'offre gratuite expirent au bout de quelques minutes : on ne garde que le
+    lecteur Windy (iframe public, sans clé) et le lien vers la page de la webcam."""
+    key = os.environ.get("WINDY_WEBCAMS_API_KEY")
+    if not key:
+        print("Webcams : WINDY_WEBCAMS_API_KEY absente, étape ignorée"); return
+    dst = os.path.join(OUT, "webcams.json")
+    if os.path.exists(dst):
+        try:
+            maj = dt.datetime.fromisoformat(json.load(open(dst))["maj_utc"])
+            if dt.datetime.now(dt.timezone.utc) - maj < dt.timedelta(hours=age_max_h):
+                print("Webcams : liste récente, pas de nouvelle requête"); return
+        except Exception:
+            pass
+    brut, offset = [], 0
+    while True:
+        r = requests.get(WINDY, headers={"x-windy-api-key": key}, timeout=60, params={
+            "nearby": f"{lat},{lon},{rayon_km}", "limit": 50, "offset": offset, "lang": "fr",
+            "include": "categories,location,player,urls"})
+        if r.status_code != 200:
+            print(f"Webcams : erreur HTTP {r.status_code} {r.text[:300]}"); return
+        d = r.json()
+        lot = d.get("webcams", [])
+        brut += lot; offset += len(lot)
+        if not lot or offset >= d.get("total", 0) or offset >= 500:
+            break
+    if brut:   # trace de la structure reçue (sans la clé), pour vérifier le format dans le journal
+        w = brut[0]
+        print("Webcams : total", len(brut), "| champs", sorted(w), "| location", sorted(w.get("location", {})),
+              "| player", sorted((w.get("player") or {})), "| urls", sorted((w.get("urls") or {})))
+    dem = m2n.load_dem()
+    out = []
+    for w in brut:
+        loc = w.get("location") or {}
+        la, lo = loc.get("latitude"), loc.get("longitude")
+        if la is None or lo is None or w.get("status", "active") != "active":
+            continue
+        x, y = wtransform("EPSG:4326", m2n.CRS, [lo], [la]); x, y = x[0], y[0]
+        j, i = int((x - m2n.AOI[0]) / m2n.RES), int((m2n.AOI[3] - y) / m2n.RES)
+        if not (0 <= i < m2n.H and 0 <= j < m2n.W) or not np.isfinite(dem[i, j]):
+            continue
+        player = w.get("player") or {}
+        lecteur = player.get("day") or player.get("live") or player.get("month")
+        if isinstance(lecteur, dict):      # selon les versions : {"embed": url, ...} ou directement l'URL
+            lecteur = lecteur.get("embed") or lecteur.get("link")
+        urls = w.get("urls") or {}
+        wid = w.get("webcamId", w.get("id"))
+        out.append({"id": wid, "titre": w.get("title", ""), "ville": loc.get("city"),
+                    "x": round(x, 1), "y": round(y, 1), "lat": la, "lon": lo, "alt_mnt": round(float(dem[i, j])),
+                    "lecteur": lecteur, "lien": urls.get("detail") or (f"https://www.windy.com/webcams/{wid}" if wid else None),
+                    "maj": w.get("lastUpdatedOn")})
+    out.sort(key=lambda c: -c["alt_mnt"])
+    write_json("webcams.json", {"source": "Windy.com Webcams", "maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
+                                "webcams": out})
+    print(f"Webcams OK : {len(out)} dans la zone (sur {len(brut)} à moins de {rayon_km} km)")
+
+
 # ------------------------------------------------------------------ AROME
 NIVEAUX = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600]
 # variables hors profil, et leur nom dans arome.json
@@ -351,10 +413,11 @@ if __name__ == "__main__":
     elif cmd == "s2": run_s2(int(sys.argv[2]) if len(sys.argv) > 2 else 5)
     elif cmd == "mtg": run_mtg(dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else None)
     elif cmd == "arome": run_arome()
+    elif cmd == "webcams": run_webcams(age_max_h=0)
     elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
         reclasser()
         a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)
     elif cmd == "tout":
         if not os.path.exists(os.path.join(OUT, "relief.png")): statique()
-        run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome()
+        run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome(); run_webcams()
     if cmd != "statique": index()

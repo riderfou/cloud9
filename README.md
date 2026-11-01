@@ -11,6 +11,7 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 | `viirs.py` | Méthode VIIRS (375 m) : fraction nuageuse par pixel + MNT 20 m à l'intérieur du pixel |
 | `mtg.py` | Meteosat MTG-FCI (500 m, toutes les 10 min) : chunk 36 seulement, correction de parallaxe (identifiants EUMETSAT) |
 | `tools/calibrage_mtg.py` | Calibrage MTG sur une journée (variantes parallaxe, seuils, filtre de bord) |
+| Webcams Windy | `pipeline.py webcams` : webcams de la zone (API Windy v3, clé `WINDY_WEBCAMS_API_KEY`), placées sur la carte avec leur altitude et un lecteur intégré |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
 | `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |
