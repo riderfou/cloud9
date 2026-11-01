@@ -9,6 +9,14 @@ const fmtDay = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", week
 const nf = new Intl.NumberFormat("fr-FR");
 
 const state = { H: 1200, exag: 1, estimate: null, sigma: null, analysis: null };
+// « Réduire les animations » (réglage système) : pas de vent animé par défaut, caméra sans glissé, nappe immobile
+const MOUVEMENT_REDUIT = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Couleur d'un token du design system (ds/tokens.css), résolue pour le thème affiché : [r, g, b] de 0 à 255.
+const sonde = document.createElement("span"); sonde.hidden = true; document.body.appendChild(sonde);
+function couleurToken(nom) {
+  sonde.style.color = `var(--${nom})`;
+  return getComputedStyle(sonde).color.match(/[\d.]+/g).slice(0, 3).map(Number);
+}
 
 // "no-cache" : le navigateur revalide auprès du serveur (GitHub Pages met les fichiers en cache 10 min)
 async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(p); return r.json(); }
@@ -46,14 +54,20 @@ const host = $("scene");
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 host.appendChild(renderer.domElement);
+// la vue 3D se pilote aussi au clavier : flèches pour se déplacer (OrbitControls)
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute("aria-label", "Vue 3D du relief : flèches pour se déplacer, boutons à droite pour zoomer et réorienter");
 const scene = new THREE.Scene();
 // brume légère, repoussée quand on dézoome (voir majBrume) pour que la carte reste lisible en vue d'ensemble
-scene.fog = new THREE.Fog(0xb8d3ec, 560, 1600);
+scene.fog = new THREE.Fog(new THREE.Color(...couleurToken("scene-brume").map((c) => c / 255)), 560, 1600);
+document.addEventListener("themechange", () => scene.fog.color.setRGB(...couleurToken("scene-brume").map((c) => c / 255), THREE.SRGBColorSpace));
+scene.fog.color.setRGB(...couleurToken("scene-brume").map((c) => c / 255), THREE.SRGBColorSpace);
 const camera = new THREE.PerspectiveCamera(45, 1, 1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 40; controls.maxDistance = 900;
+controls.listenToKeyEvents(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xdfeeff, 0x4a4030, 1.1));
 const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);   // soleil de fin d'automne, plein sud, bas
@@ -160,7 +174,8 @@ sea.rotation.x = -Math.PI / 2; sea.renderOrder = 2; scene.add(sea);
 function setH(H) {
   state.H = H;
   sea.position.y = (H * state.exag) / S; seaMat.uniforms.uH.value = H;
-  $("h-slider").value = H; $("h-val").textContent = `${nf.format(H)} m`;
+  const sl = $("h-slider"); sl.value = H; $("h-val").textContent = `${nf.format(H)} m`;
+  sl.style.setProperty("--pct", `${((H - sl.min) / (sl.max - sl.min)) * 100}%`);
   renderPeaks(); majBoutonSimulation();
 }
 // « Revenir à la simulation » : masqué s'il n'y a pas d'altitude simulée (pas de conditions pour une mer
@@ -168,6 +183,11 @@ function setH(H) {
 function majBoutonSimulation() {
   const b = $("btn-reset");
   b.hidden = state.estimate == null;
+  b.textContent = state.etat && state.etat.mode === "prevision" ? "Revenir à la prévision" : "Revenir à la mesure";
+  const rep = $("h-reperes"); rep.replaceChildren();
+  if (state.estimate != null) { const o = document.createElement("option"); o.value = state.estimate; rep.appendChild(o); }
+  $("h-repere").textContent = state.estimate == null ? ""
+    : `${state.etat && state.etat.mode === "prevision" ? "Prévision" : "Mesure"} : ${nf.format(state.estimate)} m`;
   b.disabled = state.estimate == null || state.H === state.estimate || !$("t-sea").checked;
 }
 
@@ -180,9 +200,10 @@ const VENT_N = matchMedia("(pointer: coarse)").matches ? 1800 : 3200;   // parti
 const VENT_T = 12;                 // points par traînée
 const VENT_ACC = 650;              // accélération du temps : 10 m/s -> 6,5 km par seconde à l'écran
 const VENT_PAS_TRAINEE = 0.05;     // s entre deux points de traînée
-// échelle de couleur (km/h), proche de celle de Windy
-const VENT_ECHELLE = [[0, [98, 113, 183]], [10, [57, 160, 202]], [20, [74, 196, 133]], [35, [168, 214, 74]],
-  [55, [240, 190, 55]], [70, [232, 104, 52]], [100, [200, 45, 110]]];
+// échelle de couleur (km/h) : tokens --vent-0 à --vent-6 du design system, à luminosité croissante
+// (lisible par les daltoniens, vérifiée par tools/verif_couleurs.py)
+const VENT_SEUILS = [0, 10, 20, 35, 55, 70, 100];
+const VENT_ECHELLE = VENT_SEUILS.map((k, i) => [k, couleurToken(`vent-${i}`)]);
 function couleurVent(kmh) {
   const E = VENT_ECHELLE;
   if (kmh >= E[E.length - 1][0]) return E[E.length - 1][1];
@@ -294,7 +315,9 @@ function ventResume() {
   const de = kmh < 3 ? "vent calme" : `vent moyen ${kmh} km/h, de ${POINTS_CARDINAUX[Math.round(dir / 45) % 8]}`;
   info.textContent = `${ventEtat.niveau === "sol" ? "À 10 m du sol" : "À 1 500 m (850 hPa)"} · ${fmtH.format(new Date(ventEtat.t))} · ${de} · AROME`;
 }
-$("vent-legende").innerHTML = VENT_ECHELLE.map(([k, c]) => `<span style="background:rgb(${c.map(Math.round)})">${k}</span>`).join("") + "<em>km/h</em>";
+// barre de couleurs, graduations en dessous (le texte posé sur les paliers moyens n'atteindrait pas 4,5:1)
+$("vent-legende").innerHTML = `<div class="vent-barre">${VENT_ECHELLE.map(([, c]) => `<span style="background:rgb(${c.map(Math.round)})"></span>`).join("")}</div>`
+  + `<div class="vent-graduations">${VENT_ECHELLE.map(([k]) => `<span>${k}</span>`).join("")}<em>km/h</em></div>`;
 if (vent) ventReinit();
 
 // caméra : depuis le sud-ouest, regard vers Grenoble / Grésivaudan
@@ -318,7 +341,14 @@ function statusOf(alt) {
   if (!$("t-sea").checked) return "dessus";
   return alt > state.H + tol ? "dessus" : alt < state.H - tol ? "dessous" : "bord";
 }
-const ST_TXT = { dessus: "au-dessus", bord: "au niveau du bord", dessous: "dans / sous la mer" };
+const ST_TXT = { dessus: "au soleil", bord: "au bord", dessous: "dans la nappe" };
+const ST_ICO = { dessus: "☀", bord: "≈", dessous: "☁" };
+const ST_TON = { dessus: "good", bord: "warn", dessous: "info" };
+const ST_PHRASE = { dessus: "au-dessus de la nappe affichée", bord: "au niveau du bord de la nappe affichée", dessous: "dans ou sous la nappe affichée" };
+function puce(st) {
+  const c = document.createElement("span"); c.className = "ds-chip"; c.dataset.tone = ST_TON[st];
+  c.textContent = `${ST_ICO[st]} ${ST_TXT[st]}`; return c;
+}
 // ------------------------------------------------------------------ webcams (Windy)
 const ICONE_CAM = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
 // altitude retenue (corrigée si besoin, voir webcams_corrections.json), sinon relief à la position Windy
@@ -352,8 +382,7 @@ function renderWebcams() {
     b.addEventListener("click", () => ouvrirWebcam(c, (groupesCam.find((g) => g.cams.includes(c)) || { cams: [c] }).cams));
     const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(altCam(c))} m`;
     li.append(b, alt);
-    if (sea.visible) { const chip = document.createElement("span"); chip.className = "st " + st;
-      chip.textContent = (st === "dessus" ? "☀ " : st === "bord" ? "≈ " : "☁ ") + ST_TXT[st]; li.appendChild(chip); }
+    if (sea.visible) li.appendChild(puce(st));
     ul.appendChild(li);
   });
   const plus = $("cams-plus");
@@ -366,7 +395,7 @@ function ouvrirWebcam(c, groupe = [c]) {
   $("cam-titre").textContent = c.titre;
   const st = statusOf(altCam(c));
   $("cam-info").textContent = `${nf.format(altCam(c))} m${c.corrige ? " (corrigée)" : ""}${c.ville ? ` · ${c.ville}` : ""}`
-    + (sea.visible ? ` · ${ST_TXT[st]} de la nappe affichée (${nf.format(state.H)} m)` : "");
+    + (sea.visible ? ` · ${ST_PHRASE[st]} (${nf.format(state.H)} m)` : "");
   const f = $("cam-player");
   if (c.lecteur) { f.src = c.lecteur; f.hidden = false; } else { f.removeAttribute("src"); f.hidden = true; }
   $("cam-lien").href = c.lien || "https://www.windy.com/webcams";
@@ -384,6 +413,9 @@ $("cam-dialog").addEventListener("close", () => { $("cam-player").removeAttribut
 $("cam-fermer").addEventListener("click", () => $("cam-dialog").close());
 $("cam-dialog").addEventListener("click", (e) => { if (e.target === $("cam-dialog")) $("cam-dialog").close(); });
 
+const LIEUX_REPLIES = 10;
+let lieuxDeplies = false;
+$("peaks-plus").addEventListener("click", () => { lieuxDeplies = !lieuxDeplies; renderPeaks(); });
 function renderPeaks() {
   for (const { s, L } of peakLabels) {
     const alt = altLieu(s), st = statusOf(alt);
@@ -395,17 +427,43 @@ function renderPeaks() {
   renderWebcams();
   const ul = $("peaks"); ul.replaceChildren();
   $("peaks-note").hidden = sea.visible;
-  for (const s of [...lieux].sort((a, b) => b.alt - a.alt)) {   // liste : sélection principale seulement
-    const st = statusOf(s.alt), li = document.createElement("li");
-    if (!sea.visible) { const n = document.createElement("span"); n.textContent = s.nom;
-      const al = document.createElement("span"); al.className = "alt"; al.textContent = `${nf.format(s.alt)} m`;
-      li.append(n, al); ul.appendChild(li); continue; }
-    const name = document.createElement("span"); name.textContent = s.nom;
-    const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(s.alt)} m`;
-    const chip = document.createElement("span"); chip.className = "st " + st;
-    chip.textContent = (st === "dessus" ? "☀ " : st === "bord" ? "≈ " : "☁ ") + ST_TXT[st];
-    li.append(name, alt, chip); ul.appendChild(li);
+  const tries = [...lieux].sort((a, b) => b.alt - a.alt);   // liste : sélection principale seulement
+  // repliée : les lieux autour du bord de la nappe (là où ça se joue), sinon les plus hauts
+  let debut = 0;
+  if (!lieuxDeplies && sea.visible) {
+    const i = tries.findIndex((s) => s.alt < state.H), bord = i < 0 ? tries.length : i;
+    debut = Math.max(0, Math.min(tries.length - LIEUX_REPLIES, bord - LIEUX_REPLIES / 2));
   }
+  const montres = lieuxDeplies ? tries : tries.slice(debut, debut + LIEUX_REPLIES);
+  const plus = $("peaks-plus");
+  plus.hidden = tries.length <= LIEUX_REPLIES;
+  plus.textContent = lieuxDeplies ? "Afficher moins" : `Afficher les ${tries.length} lieux`;
+  for (const s of montres) {
+    const st = statusOf(s.alt), li = document.createElement("li");
+    const name = document.createElement("span"); name.className = "nom"; name.textContent = s.nom;
+    const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(s.alt)} m`;
+    li.append(name, alt);
+    if (sea.visible) li.appendChild(puce(st));
+    ul.appendChild(li);
+  }
+  majConseil();
+}
+// Conseil de sortie : les lieux les plus bas qui sortent nettement de la nappe mesurée (ou prévue).
+// Calculé sur l'altitude estimée, pas sur le curseur : c'est une recommandation, pas une simulation.
+function majConseil() {
+  const el = $("hero-conseil");
+  if (!state.valide || state.estimate == null) { el.hidden = true; return; }
+  const seuil = state.estimate + Math.max(60, state.sigma || 0);
+  const au_soleil = lieux.filter((s) => (s.alt > seuil && s.type !== "lieu") || s.alt > seuil + 150)
+    .sort((a, b) => a.alt - b.alt).slice(0, 3);
+  if (!au_soleil.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = "";
+  const ico = document.createElement("span"); ico.textContent = "☀"; ico.setAttribute("aria-hidden", "true");
+  const txt = document.createElement("span");
+  const b = document.createElement("strong"); b.textContent = `Au soleil au-dessus de ${nf.format(Math.round(seuil / 50) * 50)} m environ`;
+  txt.append(b, ` : ${au_soleil.map((s) => `${s.nom} (${nf.format(s.alt)} m)`).join(", ")}…`);
+  el.append(ico, txt);
 }
 function setCells(mailles) {
   cellLabels.forEach((L) => { L.el.remove(); labels.splice(labels.indexOf(L), 1); });
@@ -433,6 +491,9 @@ function updateLabels() {
     // boîte à l'écran (étiquette au-dessus du point, pastille de webcam en dessous), avec 3 px de marge
     const y0 = isCam ? sy + 3 : sy - L.h - 6, b = [sx - L.w / 2 - 3, y0 - 3, sx + L.w / 2 + 3, y0 + L.h + 3];
     if (passe > 0 && (chevauche(occNoms, ...b) || (passe === 2 && chevauche(occPastilles, ...b)))) { L.el.style.display = "none"; continue; }
+    // pastilles de webcam qui se chevauchent : on n'en garde qu'une (cible tactile nette) ; les autres
+    // réapparaissent en zoomant et restent accessibles dans la liste « Webcams »
+    if (isCam && chevauche(occPastilles, ...b)) { L.el.style.display = "none"; continue; }
     (passe === 0 ? occPastilles : occNoms).push(b);
     L.el.style.display = ""; L.el.style.left = `${sx}px`; L.el.style.top = `${sy}px`;
   }
@@ -450,7 +511,8 @@ async function showAnalysis(id, synthese = false) {
   if (obsMat.alphaMap) obsMat.alphaMap.dispose();
   obsMat.alphaMap = t; obsMat.needsUpdate = true;
   setCells(VALIDE(a) ? a.mailles : []);
-  document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
+  marquerLigne(id);
+  $("hero-passe").hidden = synthese;
   renderEtat(synthese ? etatCourant() : etatDeAnalyse(a));
   ventResume();
 }
@@ -562,6 +624,8 @@ function renderEtat(e) {
   }
   hero.dataset.etat = etat;
   $("hero-statut").textContent = statut;
+  // point « en direct » qui respire : mesure satellite de moins de 90 min
+  $("hero-dot").classList.toggle("ds-dot--live", e.mode === "mesure");
   // 2. altitude, ou à défaut un titre explicite (jamais un tiret seul)
   $("hero-value").hidden = !avecValeur; $("hero-titre").hidden = avecValeur;
   $("hero-num").textContent = avecValeur ? (prevision ? "≈ " : "") + nf.format(e.sommet) : "";
@@ -573,11 +637,17 @@ function renderEtat(e) {
   const air = e.air && diag && diag !== "inconnu";
   $("hero-air").hidden = !air;
   if (air) {
-    const b = $("air-badge"); b.className = "air-badge " + diag; b.textContent = `Air ${AIR[diag]}`;
+    const b = $("air-badge"); b.dataset.tone = { favorable: "good", limite: "warn", defavorable: "info" }[diag] || "";
+    b.textContent = `Air ${AIR[diag]}`;
     const d = detailsAir(e.air); $("air-txt").textContent = d ? `${d} · AROME` : "AROME";
   }
   state.estimate = avecValeur ? e.sommet : null; state.sigma = avecValeur ? e.incert : null;
   const valide = avecValeur && (prevision ? diag !== "defavorable" : e.situation in { mer: 1, degradee: 1 });
+  state.valide = valide;
+  // résumé flottant sur la carte (mobile)
+  const r = $("resume"); r.hidden = false; r.dataset.etat = etat;
+  $("resume-txt").textContent = avecValeur ? `${prevision ? "≈ " : ""}${nf.format(e.sommet)} m · ${prevision ? "prévision" : (sit.court || "mer de nuages")}` : (titre || statut);
+  r.setAttribute("aria-label", `${statut}${avecValeur ? `, ${nf.format(e.sommet)} mètres` : titre ? `, ${titre}` : ""}. Voir le détail`);
   appliquerCalques(valide, !prevision && e.src);
   majCases();
   setH(avecValeur ? e.sommet : state.H);
@@ -599,18 +669,24 @@ function majCases() {
   if (!ok && !cb.disabled) { state.cellsPref = cb.checked; cb.checked = false; }
   if (ok && cb.disabled) cb.checked = !!state.cellsPref;
   cb.disabled = !ok;
-  $("lbl-cells").classList.toggle("inactif", !ok);
+  $("lbl-cells").classList.toggle("is-disabled", !ok);
   $("lbl-cells").title = ok ? "" : "Pas de mer de nuages sur l'image affichée";
   updateLabels();
   const nc = $("nappe-ctrl"), on = $("t-sea").checked;
-  nc.classList.toggle("inactif", !on);
+  nc.hidden = !on;   // réglages de la nappe : visibles seulement quand elle est affichée
   nc.querySelectorAll("input").forEach((x) => (x.disabled = !on));
   majBoutonSimulation();
 }
 
 // ------------------------------------------------------------------ tableau des analyses
+function marquerLigne(id) {
+  document.querySelectorAll("#analyses tr").forEach((tr) => {
+    if (tr.dataset.id === id) tr.setAttribute("aria-current", "true"); else tr.removeAttribute("aria-current");
+  });
+}
 function renderTable() {
   const tb = $("analyses"); tb.replaceChildren();
+  $("nb-analyses").textContent = hist.analyses.length;
   for (const a of [...hist.analyses].reverse()) {
     const tr = document.createElement("tr"); tr.dataset.id = a.id; tr.tabIndex = 0;
     const c1 = document.createElement("td"); c1.textContent = fmtH.format(new Date(a.date_utc));
@@ -622,7 +698,7 @@ function renderTable() {
     if (sit === "degradee") c3.title = "Mer de nuages qui se dégrade : des nuages accrochent les sommets";
     tr.append(c1, c2, c3);
     tr.addEventListener("click", () => showAnalysis(a.id));
-    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") showAnalysis(a.id); });
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showAnalysis(a.id); } });
     tb.appendChild(tr);
   }
 }
@@ -684,12 +760,12 @@ function renderChart() {
     if (h.sommet_lisse_m == null) { pen = false; continue; }
     d += `${pen ? "L" : "M"}${X(Date.parse(h.t)).toFixed(1)},${Y(h.sommet_lisse_m).toFixed(1)}`; pen = true;
   }
-  el("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+  el("path", { d, fill: "none", stroke: "var(--series-arome)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
   // observations : point + barre d'incertitude
   for (const a of obs) {
     const x = X(Date.parse(a.date_utc)), deg = situationDe(a) === "degradee";
-    el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-2)", "stroke-width": 2, opacity: deg ? 0.45 : 1 }, svg);
-    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur.startsWith("MTG") ? 3 : 4.5, fill: "var(--series-2)", "fill-opacity": deg ? 0.45 : 1, stroke: "var(--surface-1)", "stroke-width": a.capteur.startsWith("MTG") ? 1 : 2 }, svg);
+    el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-satellite)", "stroke-width": 2, opacity: deg ? 0.45 : 1 }, svg);
+    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur.startsWith("MTG") ? 3 : 4.5, fill: "var(--series-satellite)", "fill-opacity": deg ? 0.45 : 1, stroke: "var(--surface-1)", "stroke-width": a.capteur.startsWith("MTG") ? 1 : 2 }, svg);
   }
   // images sans mer de nuages : marqueur creux sur la ligne de base (l'altitude n'a pas de sens)
   for (const a of sansMer) {
@@ -713,25 +789,39 @@ function renderChart() {
       const s = document.createElement("span"); s.className = "sw"; s.style.background = color;
       const b = document.createElement("strong"); b.textContent = val; const l = document.createElement("span"); l.textContent = lab;
       d.append(s, b, l); tip.appendChild(d); };
-    row("var(--series-1)", h.sommet_lisse_m != null ? `${nf.format(h.sommet_lisse_m)} m` : "—", "AROME");
+    row("var(--series-arome)", h.sommet_lisse_m != null ? `${nf.format(h.sommet_lisse_m)} m` : "—", "AROME");
     if (h.air && h.air.diagnostic && h.air.diagnostic !== "inconnu")
-      row("var(--grid)", `air ${AIR[h.air.diagnostic]}`, (h.air.raisons || []).join(", "));
+      row(h.air.diagnostic === "defavorable" ? "var(--chart-air-defav)" : h.air.diagnostic === "limite" ? "var(--chart-air-limite)" : "var(--good-solid)", `air ${AIR[h.air.diagnostic]}`, (h.air.raisons || []).join(", "));
     if (o) {
       const lab = `${o.satellite} ${fmtHM.format(new Date(o.date_utc))}`;
-      if (VALIDE(o)) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, lab + (situationDe(o) === "degradee" ? " · se dégrade" : ""));
+      if (VALIDE(o)) row("var(--series-satellite)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, lab + (situationDe(o) === "degradee" ? " · se dégrade" : ""));
       else row("var(--text-muted)", (SIT[situationDe(o)] || SIT.indetermine).court, lab);
     }
     placerInfobulle(tip, e.clientX, e.clientY);
   });
   hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });
   $("chart").replaceChildren(svg);
-  $("chart-legend").innerHTML = `<span><i class="l-dot"></i>Mesure satellite</span><span><i class="l-hollow"></i>Pas de mer de nuages</span>`
-    + `<span><i class="l-line"></i>Prévision AROME</span><span><i class="l-band"></i>Air défavorable</span>`;
+  $("chart-legend").innerHTML = `<span><i class="ds-swatch ds-swatch--dot"></i>Mesure satellite</span>`
+    + `<span><i class="ds-swatch ds-swatch--ring"></i>Pas de mer de nuages</span>`
+    + `<span><i class="ds-swatch ds-swatch--line"></i>Prévision AROME</span>`
+    + `<span><i class="ds-swatch ds-swatch--band"></i>Air défavorable</span>`
+    + `<span><i class="ds-swatch ds-swatch--band" style="--c: var(--chart-air-limite)"></i>Air limite</span>`;
+  // résumé textuel pour les lecteurs d'écran
+  const der = obs[obs.length - 1], prochaine = fc.find((h) => Date.parse(h.t) > now && h.sommet_lisse_m != null);
+  svg.setAttribute("aria-label", "Altitude du sommet de la mer de nuages sur 48 heures et prévision. "
+    + (der ? `Dernière mesure satellite : ${nf.format(der.sommet_m)} m ${quand(der)}. ` : "Aucune mesure satellite de mer de nuages sur 48 heures. ")
+    + (prochaine ? `Prévision AROME pour ${fmtH.format(new Date(prochaine.t))} : ${nf.format(prochaine.sommet_lisse_m)} m.` : ""));
 }
 
 // ------------------------------------------------------------------ interface
 $("h-slider").addEventListener("input", (e) => setH(Number(e.target.value)));
 $("btn-reset").addEventListener("click", () => state.estimate != null && setH(state.estimate));
+$("btn-direct").addEventListener("click", () => { const id = idCourant(); if (id) showAnalysis(id, true); });
+$("resume").addEventListener("click", () => {
+  $("hero").scrollIntoView({ behavior: MOUVEMENT_REDUIT ? "auto" : "smooth", block: "start" });
+  $("panel").focus({ preventScroll: true });
+});
+if (MOUVEMENT_REDUIT) $("t-vent").checked = false;
 $("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; renderPeaks(); majCases(); });
 $("t-obs").addEventListener("change", (e) => (obsMesh.visible = e.target.checked));
 $("t-neige").addEventListener("change", (e) => (neigeMesh.visible = e.target.checked && !!neigeMat.alphaMap));
@@ -784,7 +874,7 @@ async function rafraichir() {
       const id = idCourant();
       if (state.synthese && id) await showAnalysis(id, true);
       else if (state.analysis) {
-        document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === state.analysis.id));
+        marquerLigne(state.analysis.id);
         renderEtat(etatDeAnalyse(state.analysis));
       }
     } else if (state.synthese) renderEtat(etatCourant());   // l'âge de la mesure change : direct -> médiane -> prévision
@@ -804,6 +894,7 @@ document.addEventListener("visibilitychange", () => {
 const sph = new THREE.Spherical(), off = new THREE.Vector3();
 let anim = null;   // {t0, dur, de: {theta, radius}, vers: {theta, radius}}
 function animerCamera(vers, dur = 600) {
+  if (MOUVEMENT_REDUIT) dur = 1;
   off.copy(camera.position).sub(controls.target); sph.setFromVector3(off);
   const de = { theta: sph.theta, radius: sph.radius };
   vers = { theta: vers.theta ?? de.theta, radius: vers.radius ?? de.radius };
@@ -820,7 +911,13 @@ function avancerAnimation() {
   camera.position.copy(controls.target).add(off.setFromSpherical(sph));
   if (k >= 1) anim = null;
 }
-controls.addEventListener("start", () => { anim = null; });   // l'utilisateur reprend la main
+controls.addEventListener("start", () => { anim = null; masquerAstuce(); });   // l'utilisateur reprend la main
+// astuce de navigation : effacée dès la première manipulation, et plus jamais affichée ensuite
+function masquerAstuce() {
+  $("hint").classList.add("vu");
+  try { localStorage.setItem("mdn-astuce-vue", "1"); } catch (e) { /* navigation privée */ }
+}
+try { if (localStorage.getItem("mdn-astuce-vue")) $("hint").classList.add("vu"); } catch (e) { /* idem */ }
 const zoomer = (f) => {
   off.copy(camera.position).sub(controls.target);
   const r = (anim ? anim.vers.radius : off.length()) * f;
@@ -849,7 +946,7 @@ setInterval(() => { if (state.synthese || !state.analysis) ventResume(); }, 60e3
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   if (ventLignes.visible && document.visibilityState === "visible") ventAvancer(dt);
-  seaMat.uniforms.uTime.value = clock.getElapsedTime();
+  if (!MOUVEMENT_REDUIT) seaMat.uniforms.uTime.value = clock.getElapsedTime();
   avancerAnimation();
   controls.update(); renderer.render(scene, camera); updateLabels(); majBoussole(); majBrume();
 });

@@ -1,17 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Sommets qui émergent d'une mer de nuages -->
+  <!-- Logo « Grelou » : la Dent de Crolles et une pointe de Belledonne au-dessus de la mer de nuages,
+       soleil Chartreuse. Couleurs = primitives de web/ds/tokens.css (ciel, ardoise, chartreuse). -->
   <defs>
     <linearGradient id="ciel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a78d6"/>
-      <stop offset="1" stop-color="#7fb4ec"/>
+      <stop offset="0" stop-color="#1b5fa6"/>
+      <stop offset="1" stop-color="#78b3eb"/>
     </linearGradient>
-    <clipPath id="coins"><rect width="64" height="64" rx="14"/></clipPath>
+    <clipPath id="coins"><rect width="64" height="64" rx="15"/></clipPath>
   </defs>
   <g clip-path="url(#coins)">
-  <rect width="64" height="64" fill="url(#ciel)"/>
-  <path d="M4 44 L22 16 L30 28 L38 12 L60 44 Z" fill="#33403a"/>
-  <path d="M22 16 L26.5 23 L23 22 L19.5 25 L18.8 21 Z M38 12 L44 21 L40 20 L36.5 23 L35 17.5 Z" fill="#f4f3ef"/>
-  <path d="M0 40 C8 35 14 41 22 37 C30 33 36 40 44 36 C52 32 58 38 64 35 L64 50 L0 50 Z" fill="#ffffff" opacity="0.85"/>
-  <path d="M0 44 C10 40 18 45 28 42 C38 39 46 45 56 41 C60 40 62 40 64 40 L64 64 L0 64 Z" fill="#dfe9f5"/>
+    <rect width="64" height="64" fill="url(#ciel)"/>
+    <circle cx="50" cy="15" r="6.5" fill="#c3dd34"/>
+    <!-- Dent de Crolles : plateau et falaise ; à droite, un sommet pointu -->
+    <path d="M-2 46 L9 35 L14 27.5 L17 22.5 L30 21.5 L30.4 30 L35 34.5 L44 18 L52 28.5 L66 44 L66 50 L-2 50 Z" fill="#29302d"/>
+    <path d="M17 22.5 L30 21.5 L30.1 24 L26 24.6 L21.5 25.6 L15.6 25.4 Z M44 18 L48.8 25.2 L45.2 24 L41.3 25.6 Z" fill="#f9faf8"/>
+    <path d="M-2 41 C7 36.5 13 41.5 21 38 C29 34.5 35 41 43 37.5 C51 34 57 39.5 66 36 L66 52 L-2 52 Z" fill="#ffffff" opacity=".88"/>
+    <path d="M-2 46 C9 42 18 47 28 44 C38 41 46 46.5 56 43 C60 41.8 63 41.6 66 41.8 L66 66 L-2 66 Z" fill="#f2f4f1"/>
   </g>
 </svg>

@@ -1,0 +1,261 @@
+/* =====================================================================
+   Mer de nuages · design system « Grelou » — tokens
+   ---------------------------------------------------------------------
+   Trois niveaux (voir docs/design-system/README.md) :
+   1. primitives  : la palette brute, nommée d'après le pays grenoblois
+   2. sémantiques : le rôle d'une couleur (surface, texte, état…), clair ET sombre
+   3. domaine     : les codes de l'application (états de la nappe, séries du
+                    graphique, échelle du vent, carte), vérifiés pour les
+                    daltoniens par tools/verif_couleurs.py
+   Thème : `light-dark()` suit `color-scheme`, qui suit l'attribut
+   data-theme de <html> (« light », « dark ») ou, à défaut, le système.
+   ===================================================================== */
+
+/* ---------------------------------------------------------- polices */
+@font-face { font-family: "Barlow"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/barlow-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-style: italic; font-weight: 400; font-display: swap;
+  src: url("fonts/barlow-latin-400-italic.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/barlow-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/barlow-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Semi Condensed"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/barlow-semi-condensed-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Semi Condensed"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("fonts/barlow-semi-condensed-latin-700-normal.woff2") format("woff2"); }
+
+:root {
+  color-scheme: light dark;
+
+  /* ======================================================= 1. primitives */
+  /* Ardoise — les neutres : la pierre des toits et des falaises du Vercors */
+  --ardoise-0:   #ffffff;
+  --ardoise-25:  #f9faf8;
+  --ardoise-50:  #f2f4f1;
+  --ardoise-100: #e8ebe6;
+  --ardoise-200: #d8dcd5;
+  --ardoise-300: #bcc2bb;
+  --ardoise-400: #959d96;
+  --ardoise-500: #6e7770;
+  --ardoise-600: #535c56;
+  --ardoise-700: #3c4440;
+  --ardoise-800: #29302d;
+  --ardoise-850: #202724;
+  --ardoise-900: #171d1b;
+  --ardoise-950: #0f1412;
+
+  /* Ciel — le bleu d'altitude au-dessus de la mer de nuages (couleur de marque) */
+  --ciel-50:  #edf5fd;
+  --ciel-100: #d5e8fa;
+  --ciel-200: #a9d0f4;
+  --ciel-300: #78b3eb;
+  --ciel-400: #4893de;
+  --ciel-500: #2477c9;
+  --ciel-600: #1b5fa6;
+  --ciel-700: #174c84;
+  --ciel-800: #143b65;
+  --ciel-900: #102b49;
+
+  /* Chartreuse — l'accent grenoblois (la liqueur et le massif) */
+  --chartreuse-200: #e8f5a3;
+  --chartreuse-300: #d6ec66;
+  --chartreuse-400: #c3dd34;
+  --chartreuse-500: #a6c216;
+  --chartreuse-600: #839b0d;
+  --chartreuse-700: #62740c;
+  --chartreuse-800: #46530d;
+
+  /* Soleil — l'or des crêtes au-dessus de la nappe */
+  --soleil-100: #fff0c7;
+  --soleil-200: #ffe08f;
+  --soleil-300: #ffcd57;
+  --soleil-400: #f7b52c;
+  --soleil-500: #e39b0b;
+  --soleil-600: #b77b00;
+  --soleil-700: #8b5c00;
+  --soleil-800: #5f3f05;
+
+  /* Balise — l'orange-rouge du balisage des sentiers */
+  --balise-100: #fde3d8;
+  --balise-200: #fbc2ab;
+  --balise-300: #f79a76;
+  --balise-400: #f0764a;
+  --balise-500: #e0592c;
+  --balise-600: #bd441c;
+  --balise-700: #933417;
+  --balise-800: #652614;
+
+  /* Sapin — les forêts de Chartreuse */
+  --sapin-100: #dcf1e3;
+  --sapin-200: #b4e2c3;
+  --sapin-300: #7fcb9b;
+  --sapin-400: #4daf74;
+  --sapin-500: #2f9259;
+  --sapin-600: #237547;
+  --sapin-700: #1b5c39;
+  --sapin-800: #14432b;
+
+  /* Brume — le gris-bleu du dessous de la mer de nuages */
+  --brume-100: #e6ecf3;
+  --brume-200: #cdd8e5;
+  --brume-300: #a9bacd;
+  --brume-400: #8299b3;
+  --brume-500: #627a97;
+  --brume-600: #4b6079;
+  --brume-700: #394a5e;
+  --brume-800: #283544;
+
+  /* ======================================================= 2. sémantiques */
+  /* surfaces : 0 = fond de page, 1 = panneau, 2 = carte posée, 3 = enfoncé / survol */
+  --surface-0: light-dark(var(--ardoise-50), var(--ardoise-950));
+  --surface-1: light-dark(var(--ardoise-25), var(--ardoise-900));
+  --surface-2: light-dark(var(--ardoise-50), var(--ardoise-850));
+  --surface-3: light-dark(var(--ardoise-100), var(--ardoise-800));
+  --surface-raised: light-dark(var(--ardoise-0), var(--ardoise-850));
+  --border: light-dark(var(--ardoise-200), #333b37);
+  --border-strong: light-dark(var(--ardoise-300), var(--ardoise-700));
+  --control-off: light-dark(var(--ardoise-500), #7d867f);   /* contour d'un contrôle inactif (3:1) */
+
+  --text-primary: light-dark(var(--ardoise-950), #eef1ec);
+  --text-secondary: light-dark(var(--ardoise-700), var(--ardoise-200));
+  --text-muted: light-dark(#5b645e, var(--ardoise-400));
+  --text-on-accent: light-dark(var(--ardoise-0), var(--ardoise-950));
+
+  /* action : liens, bouton principal, sélection, focus */
+  --accent: light-dark(var(--ciel-600), var(--ciel-300));
+  --accent-hover: light-dark(var(--ciel-700), var(--ciel-200));
+  --accent-soft: light-dark(var(--ciel-50), #15304d);
+  --focus-ring: light-dark(var(--ciel-500), var(--ciel-300));
+  --marque: var(--chartreuse-400);          /* touche de marque : logo, sélection forte */
+  --marque-texte: var(--ardoise-950);       /* texte posé sur la touche de marque */
+
+  /* tons d'état : texte (fg), fond (bg), aplat (solid) */
+  --good:       light-dark(var(--sapin-700), var(--sapin-300));
+  --good-bg:    light-dark(var(--sapin-100), #103020);
+  --good-solid: var(--sapin-500);
+  --warn:       light-dark(var(--soleil-700), var(--soleil-300));
+  --warn-bg:    light-dark(var(--soleil-100), #4d390c);
+  --warn-solid: var(--soleil-400);
+  --info:       light-dark(var(--brume-700), var(--brume-200));
+  --info-bg:    light-dark(var(--brume-200), #313f51);
+  --info-solid: var(--brume-500);
+  --danger:     light-dark(var(--balise-700), var(--balise-300));
+  --danger-bg:  light-dark(var(--balise-100), #3d1d12);
+
+  /* ======================================================= 3. domaine */
+  /* états de la carte « en ce moment » */
+  --etat-mer: var(--good);              /* mer de nuages nette */
+  --etat-alerte: var(--warn);           /* nappe qui se dégrade */
+  --etat-absente: var(--info);          /* pas de mer de nuages */
+  --etat-prevision: var(--series-arome); /* pas d'image récente : prévision */
+
+  /* position d'un lieu par rapport à la nappe (toujours doublée d'un pictogramme ☀ ≈ ☁) */
+  --pos-dessus: var(--good);   --pos-dessus-bg: var(--good-bg);
+  --pos-bord: var(--warn);     --pos-bord-bg: var(--warn-bg);
+  --pos-dessous: var(--info);  --pos-dessous-bg: var(--info-bg);
+
+  /* graphique : AROME = ligne bleue, satellite = points orange (paire sûre pour les daltoniens) */
+  --series-arome: light-dark(var(--ciel-500), var(--ciel-400));
+  --series-satellite: light-dark(var(--balise-500), var(--balise-400));
+  --chart-grid: light-dark(var(--ardoise-100), var(--ardoise-800));
+  --chart-air-defav: light-dark(#d3dbe4, #2f3a47);
+  --chart-air-limite: light-dark(#e8ecf0, #222a33);
+
+  /* vent : échelle séquentielle à luminosité croissante (type « plasma »),
+     lisible quelle que soit la vision des couleurs. Seuils en km/h dans app.js. */
+  --vent-0: #110852;   /*   0 km/h */
+  --vent-1: #5b018d;   /*  10 */
+  --vent-2: #874179;   /*  20 */
+  --vent-3: #bf5e5e;   /*  35 */
+  --vent-4: #e78272;   /*  55 */
+  --vent-5: #e0c043;   /*  70 */
+  --vent-6: #fdef59;   /* 100 */
+
+  /* scène 3D : ciel du jour / ciel de crépuscule */
+  --scene-ciel-haut: light-dark(#4f86c2, #0b1424);
+  --scene-ciel-milieu: light-dark(#9ec4e8, #1d3150);
+  --scene-ciel-bas: light-dark(#dde9f3, #3a567c);
+  --scene-brume: light-dark(#b8d3ec, #3a567c);
+  --scene-texte: #ffffff;
+
+  /* étiquettes posées sur l'image satellite : toujours claires (l'image ne change pas de thème) */
+  --map-label-bg: rgb(255 255 255 / .9);
+  --map-label-bg-r2: rgb(255 255 255 / .78);
+  --map-label-fg: var(--ardoise-950);
+  --map-label-sub: var(--ardoise-600);
+  --map-label-dessous-bg: rgb(224 231 239 / .72);
+  --map-label-dessous-fg: #3a4552;
+  --map-label-bord-bg: rgb(255 224 143 / .94);   /* soleil-200 */
+  --map-label-mesure-bg: rgb(189 68 28 / .95);     /* balise-600 : série satellite, assez foncé pour du texte blanc */
+  --map-pin: var(--ardoise-800);
+  --map-pin-dessus: var(--soleil-400);              /* au soleil */
+  --map-pin-dessous: rgb(98 122 151 / .94);         /* dans la nappe */
+  --map-pin-badge: var(--ciel-500);
+
+  /* ======================================================= typographie */
+  --font-sans: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Barlow Semi Condensed", "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --text-3xl: 34px;
+  --text-display: 60px;
+  --leading-tight: 1.05;
+  --leading-snug: 1.3;
+  --leading-normal: 1.5;
+  --tracking-display: -0.01em;
+  --tracking-eyebrow: 0.08em;
+
+  /* ======================================================= espace, formes */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  --control-h: 36px;     /* hauteur d'un bouton, d'un champ */
+  --tap-min: 44px;       /* cible tactile minimale (WCAG 2.5.5, HIG) */
+  --panel-w: 400px;
+
+  --shadow-1: 0 1px 2px rgb(15 20 18 / .08), 0 1px 3px rgb(15 20 18 / .06);
+  --shadow-2: 0 2px 6px rgb(15 20 18 / .12), 0 6px 16px rgb(15 20 18 / .08);
+  --shadow-3: 0 12px 40px rgb(15 20 18 / .28);
+  --shadow-map: 0 1px 4px rgb(0 0 0 / .3);
+
+  /* ======================================================= mouvement */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 420ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+
+  /* ======================================================= profondeur */
+  --z-labels: 1;
+  --z-map-ui: 5;
+  --z-sticky: 8;
+  --z-tooltip: 20;
+  --z-overlay: 30;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+}

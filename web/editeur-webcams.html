@@ -5,67 +5,56 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Éditeur des webcams · Mer de nuages</title>
 <meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#4f86c2">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="ds/tokens.css">
+<link rel="stylesheet" href="ds/components.css">
+<script src="ds/theme.js"></script>
 <style>
-:root {
-  color-scheme: light;
-  --surface-1: #fcfcfb; --surface-2: #f2f1ee; --border: #e2e0da;
-  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
-  --accent: #2a78d6; --good: #1f8a4c; --good-bg: #e3f4ea; --warn: #9a6a00; --warn-bg: #fdf1d6;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --surface-1: #1a1a19; --surface-2: #242422; --border: #3a3936;
-    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
-    --accent: #3987e5; --good: #5cc98a; --good-bg: #1d3327; --warn: #e5b14a; --warn-bg: #3a2f17;
-  }
-}
+/* Éditeur des webcams : mise en page propre à la page ; couleurs et composants du design system (ds/). */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { display: flex; background: var(--surface-1); color: var(--text-primary); font-size: 14px; }
+body { background: var(--surface-1); color: var(--text-primary); }
+.app { display: flex; height: 100%; }
 #carte { flex: 1; min-width: 0; height: 100%; }
 #panneau { width: 400px; height: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface-1); }
-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
-h1 { margin: 0; font-size: 18px; }
-header p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+header { padding: var(--space-4) var(--space-4) var(--space-3); border-bottom: 1px solid var(--border); }
+.tete { display: flex; align-items: center; gap: var(--space-3); }
+.tete h1 { flex: 1; }
+h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: var(--text-xl); }
+header p { margin: var(--space-2) 0 0; font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--text-secondary); }
 header a { color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
-button, .bouton { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
-button.principal { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-button:disabled { opacity: .5; cursor: default; }
 .compte { font-size: 12px; color: var(--text-secondary); }
 .filtres { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
-.filtres input[type=search] { flex: 1; min-width: 0; font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+.filtres input[type=search] { flex: 1; min-width: 0; font: inherit; min-height: var(--control-h); padding: 0 var(--space-3); border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
 #liste { flex: 1; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 #liste li { display: flex; align-items: center; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
 #liste li:hover { background: var(--surface-2); }
-#liste li.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#liste li.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+#liste li:focus-visible { outline-offset: -2px; }
+.filtre-case { display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; cursor: pointer; }
 #liste .nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #liste .alt { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
-.etat { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
-.etat.suspecte { color: var(--warn); background: var(--warn-bg); }
-.etat.corrigee { color: var(--good); background: var(--good-bg); }
 #fiche { border-top: 1px solid var(--border); padding: 12px 16px 16px; max-height: 58%; overflow-y: auto; background: var(--surface-2); }
-#fiche h2 { margin: 0; font-size: 15px; }
+#fiche h2 { margin: 0; font-family: var(--font-display); font-size: var(--text-lg); }
 #fiche .sous { margin: 2px 0 8px; font-size: 12px; color: var(--text-secondary); }
 #fiche iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 6px; background: var(--border); }
 .champ { display: grid; gap: 3px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
-.champ input { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+.champ input { font: inherit; font-size: var(--text-sm); min-height: var(--control-h); padding: 0 var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
 .valeurs { margin-top: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .valeurs strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .aide { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; }
 /* marqueurs */
-.pt { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px #0007; background: #6b6a66; }
-.pt.suspecte { background: #e5a50a; }
-.pt.corrigee { background: #1f8a4c; }
+.pt { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ardoise-0); box-shadow: var(--shadow-map); background: var(--ardoise-500); }
+.pt.suspecte { background: var(--soleil-400); }
+.pt.corrigee { background: var(--sapin-500); }
 .pt.sel { width: 22px; height: 22px; margin: -3px 0 0 -3px; background: var(--accent); outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); }
-.fantome { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed #6b6a66; background: #fff8; }
+.fantome { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed var(--ardoise-500); background: rgb(255 255 255 / .5); }
 @media (max-width: 800px) {
-  body { flex-direction: column; }
+  .app { flex-direction: column; height: auto; }
   #carte { height: 55vh; flex: none; }
   #panneau { width: 100%; height: auto; border-left: 0; }
   #liste { max-height: 40vh; }
@@ -73,23 +62,28 @@ button:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
-<div id="carte" aria-label="Carte des webcams"></div>
+<main class="app">
+<div id="carte" role="region" aria-label="Carte des webcams"></div>
 <aside id="panneau">
   <header>
-    <h1>Éditeur des webcams</h1>
+    <div class="tete">
+      <img class="ds-logo" src="favicon.svg" alt="" width="32" height="32">
+      <h1>Éditeur des webcams</h1>
+      <button class="ds-icon-btn" type="button" data-theme-toggle aria-label="Changer de thème"></button>
+    </div>
     <p>Glissez chaque marqueur à la position réelle de la caméra, puis exportez le fichier
       <code>webcams_corrections.json</code> à déposer à la racine du dépôt. <a href="./">Retour à la carte</a></p>
     <div class="actions">
-      <button id="exporter" class="principal" type="button">Exporter le fichier</button>
-      <label class="bouton" for="importer">Importer…</label>
+      <button id="exporter" class="ds-btn ds-btn--primary ds-btn--sm" type="button">Exporter le fichier</button>
+      <label class="ds-btn ds-btn--sm" for="importer">Importer…</label>
       <input id="importer" type="file" accept=".json,application/json" hidden>
-      <button id="reinit" type="button">Tout annuler</button>
+      <button id="reinit" class="ds-btn ds-btn--sm" type="button">Tout annuler</button>
       <span class="compte" id="compte"></span>
     </div>
   </header>
   <div class="filtres">
     <input type="search" id="recherche" placeholder="Rechercher une webcam ou un village" aria-label="Rechercher">
-    <label><input type="checkbox" id="suspectes"> À vérifier</label>
+    <label class="filtre-case"><input type="checkbox" class="ds-switch" id="suspectes"> À vérifier</label>
   </div>
   <ul id="liste"></ul>
   <section id="fiche" hidden>
@@ -104,12 +98,13 @@ button:disabled { opacity: .5; cursor: default; }
       <input type="text" id="f-note" placeholder="ex. caméra en haut du télésiège">
     </label>
     <div class="actions">
-      <button id="f-windy" type="button">Revenir à la position Windy</button>
-      <button id="f-annuler" type="button">Annuler la correction</button>
+      <button id="f-windy" class="ds-btn ds-btn--sm" type="button">Revenir à la position Windy</button>
+      <button id="f-annuler" class="ds-btn ds-btn--sm" type="button">Annuler la correction</button>
     </div>
     <p class="aide">Astuce : la vue satellite (en haut à droite de la carte) aide à repérer gares de télésiège et sommets.</p>
   </section>
 </aside>
+</main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.min.js"></script>
@@ -169,7 +164,8 @@ const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Wo
 L.control.layers({ "Topographique": topo, "Satellite": sat }, null, { position: "topright" }).addTo(carte);
 const [la0, lo0] = proj4("UTM31", "EPSG:4326", [X0, Y0]).reverse(), [la1, lo1] = proj4("UTM31", "EPSG:4326", [X1, Y1]).reverse();
 carte.fitBounds([[la0, lo0], [la1, lo1]]);
-L.rectangle([[la0, lo0], [la1, lo1]], { color: "#2a78d6", weight: 1, fill: false, dashArray: "4 4", interactive: false }).addTo(carte);
+// couleurs Leaflet : options JavaScript, recopiées des primitives (ciel-500, ardoise-500) de ds/tokens.css
+L.rectangle([[la0, lo0], [la1, lo1]], { color: "#2477c9", weight: 1, fill: false, dashArray: "4 4", interactive: false }).addTo(carte);
 
 let sel = null;
 const marqueurs = {}, fantomes = {};
@@ -195,7 +191,7 @@ function dessiner(c) {
     const w = windy(c);
     fantomes[c.id] = [
       L.marker(w, { icon: L.divIcon({ className: "", html: '<div class="fantome"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }), interactive: false }).addTo(carte),
-      L.polyline([w, p], { color: "#6b6a66", weight: 1.5, dashArray: "3 4", interactive: false }).addTo(carte),
+      L.polyline([w, p], { color: "#6e7770", weight: 1.5, dashArray: "3 4", interactive: false }).addTo(carte),
     ];
   }
 }
@@ -247,7 +243,7 @@ function rendreListe() {
     const p = position(c), z = corr[c.id] && corr[c.id].alt != null ? corr[c.id].alt : altitude(p[0], p[1]);
     const a = document.createElement("span"); a.className = "alt"; a.textContent = z == null ? "" : `${nf.format(z)} m`;
     li.append(n, a);
-    const e = etat(c); if (e) { const s = document.createElement("span"); s.className = "etat " + e; s.textContent = e === "corrigee" ? "corrigée" : "à vérifier"; li.appendChild(s); }
+    const e = etat(c); if (e) { const s = document.createElement("span"); s.className = "ds-chip"; s.dataset.tone = e === "corrigee" ? "good" : "warn"; s.textContent = e === "corrigee" ? "corrigée" : "à vérifier"; li.appendChild(s); }
     li.addEventListener("click", () => choisir(c));
     li.addEventListener("keydown", (ev) => { if (ev.key === "Enter") choisir(c); });
     ul.appendChild(li);

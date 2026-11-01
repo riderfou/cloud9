@@ -1,0 +1,17 @@
+{
+  "name": "Mer de nuages · Grenoble",
+  "short_name": "Mer de nuages",
+  "description": "Altitude du sommet de la mer de nuages autour de Grenoble, mesurée par satellite et prévue par AROME, sur le relief en 3D.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f9faf8",
+  "theme_color": "#4f86c2",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
