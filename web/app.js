@@ -89,6 +89,27 @@ const obsMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
 const obsMesh = new THREE.Mesh(geo, obsMat); obsMesh.visible = false; scene.add(obsMesh);
 
+// neige (composite MTG des dernières observations sans nuage) : R = fraction enneigée.
+// Le fond de carte est une image d'été (sans neige saisonnière) : c'est ce calque qui montre la neige du moment.
+const neigeMeta = await getJSON("data/neige.json").catch(() => null);
+const neigeMat = new THREE.MeshLambertMaterial({ color: 0xf6f9ff, transparent: true, opacity: 0.95, depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+const neigeMesh = new THREE.Mesh(geo, neigeMat); neigeMesh.visible = false; scene.add(neigeMesh);
+if (neigeMeta) {
+  try {
+    const img = await loadImage(`data/neige.png?v=${encodeURIComponent(neigeMeta.maj_utc)}`);
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height);
+    for (let k = 0; k < d.data.length; k += 4) { const r = d.data[k]; d.data[k + 1] = r; d.data[k + 2] = r; d.data[k + 3] = 255; }
+    g.putImageData(d, 0, 0);
+    const c2 = document.createElement("canvas"); c2.width = c.width; c2.height = c.height;
+    const g2 = c2.getContext("2d"); g2.filter = "blur(0.6px)"; g2.drawImage(c, 0, 0);   // alphaMap : canal vert
+    const t = new THREE.CanvasTexture(c2); t.flipY = true;
+    neigeMat.alphaMap = t; neigeMat.needsUpdate = true; neigeMesh.visible = true;
+  } catch (e) { console.warn("neige indisponible", e); }
+}
+
 // mer de nuages simulée : plan horizontal à H, bords adoucis là où le relief affleure
 const hTex = new THREE.DataTexture(Z, GW, GH, THREE.RedFormat, THREE.FloatType);
 hTex.magFilter = THREE.LinearFilter; hTex.minFilter = THREE.LinearFilter; hTex.needsUpdate = true;
@@ -566,6 +587,13 @@ $("h-slider").addEventListener("input", (e) => setH(Number(e.target.value)));
 $("btn-reset").addEventListener("click", () => state.estimate != null && setH(state.estimate));
 $("t-sea").addEventListener("change", (e) => { sea.visible = e.target.checked; renderPeaks(); majCases(); });
 $("t-obs").addEventListener("change", (e) => (obsMesh.visible = e.target.checked));
+$("t-neige").addEventListener("change", (e) => (neigeMesh.visible = e.target.checked && !!neigeMat.alphaMap));
+if (neigeMeta && neigeMat.alphaMap) {
+  const d = new Date(neigeMeta.maj_utc);
+  $("t-neige-date").textContent = ` · ${new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "short" }).format(d)}`;
+  $("t-neige").closest("label").title = `Composite Meteosat des dernières observations sans nuage (mise à jour ${fmtH.format(d)})`
+    + (neigeMeta.limite_enneigement_m ? ` · limite d'enneigement vers ${nf.format(neigeMeta.limite_enneigement_m)} m` : "");
+} else { $("t-neige").closest("label").hidden = true; }
 $("t-cells").addEventListener("change", () => updateLabels());
 $("t-cams").addEventListener("change", () => updateLabels());
 $("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); });

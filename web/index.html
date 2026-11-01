@@ -71,6 +71,7 @@
   <section class="controls">
     <div class="toggles">
       <label><input type="checkbox" id="t-obs" checked> Nuages observés (satellite)</label>
+      <label><input type="checkbox" id="t-neige" checked> Neige (satellite<span id="t-neige-date"></span>)</label>
       <label><input type="checkbox" id="t-sea" checked> Nappe simulée</label>
       <div class="nappe-ctrl" id="nappe-ctrl">
         <label for="h-slider" class="row-label">Altitude de la nappe affichée <strong id="h-val">—</strong></label>
@@ -122,6 +123,10 @@
       là où le terrain émerge du nuage. Avec VIIRS (375 m), on utilise la fraction nuageuse de chaque pixel de bord et le
       MNT à 20 m à l'intérieur du pixel. La nuit, Meteosat repère les nuages bas en infrarouge : leurs gouttelettes
       émettent moins à 3,8 µm qu'à 10,5 µm (résolution 1 km).</p>
+    <p>Le fond de carte est une image Sentinel-2 d'été (22 juillet 2026), sans neige saisonnière. La neige du moment vient
+      de Meteosat : brillante dans le visible mais sombre à 2,2 µm, elle se distingue des nuages. Pour chaque point, on garde
+      la dernière observation sans nuage, prise près du midi solaire ; la neige d'un pixel de 500 m est posée sur la partie
+      la plus haute du relief qu'il couvre.</p>
     <p>Pour vérifier qu'il s'agit bien d'une mer de nuages, on contrôle sur l'image que le relief nettement au-dessus du
       sommet estimé est dégagé. Sinon, la nappe se dégrade ou s'est disloquée et l'altitude n'a plus de sens. En parallèle,
       le profil AROME indique si la masse d'air est favorable : air stable ou inversion de température, peu de vent, pas de pluie.</p>

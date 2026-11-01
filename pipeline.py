@@ -18,6 +18,7 @@ from scipy import ndimage
 from rasterio.warp import transform as wtransform
 import mer2nuages as m2n
 import situation as sit
+import neige
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "web", "data")
@@ -88,7 +89,7 @@ def statique():
     import rasterio
     from rasterio.windows import from_bounds
     from rasterio.enums import Resampling
-    scene = "S2C_31TGL_20251104_0_L2A"
+    scene = "S2C_31TGL_20260722_0_L2A"   # 22/07/2026 : sans nuages, sans neige saisonnière (seuls les glaciers)
     tw, th = m2n.W * 2 // 3, m2n.H * 2 // 3
     a = m2n.lire_s2(scene, "TCI.tif", bandes=3, out_shape=(th, tw))   # mosaïque des tuiles du même passage
     a = np.moveaxis(a, 0, -1).astype("float32")
@@ -263,6 +264,14 @@ def run_mtg(debut=None, fin=None, pas_min=30, max_images=16, heures=6):
             print(f"  MTG {t0:%H:%M} : échec ({e})"); continue
         save_analysis(res, np.nan_to_num(fmap), meta)
         fait += 1
+        quand = dt.datetime.fromisoformat(meta["date_utc"])
+        if meta["capteur"] == "MTG-FCI" and neige.proche_midi(quand):      # jour, près du midi solaire
+            try:
+                n = neige.mettre_a_jour(OUT, neige.vers_grille(v, neige.fraction_pixels(v), relief_web(), mtg.parallaxe_utm()),
+                                        quand, relief_web(), meta["id"])
+                print(f"  neige : {n['surface_enneigee_km2']} km², limite ~{n['limite_enneigement_m']} m, zone observée {n['part_observee']:.0%}")
+            except Exception as e:
+                print(f"  neige : échec ({e})")
 
 
 # ------------------------------------------------------------------ observations Météo-France
