@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Éditeur des webcams · Mer de nuages</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb; --surface-2: #f2f1ee; --border: #e2e0da;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --accent: #2a78d6; --good: #1f8a4c; --good-bg: #e3f4ea; --warn: #9a6a00; --warn-bg: #fdf1d6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --surface-2: #242422; --border: #3a3936;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a998f;
+    --accent: #3987e5; --good: #5cc98a; --good-bg: #1d3327; --warn: #e5b14a; --warn-bg: #3a2f17;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { display: flex; background: var(--surface-1); color: var(--text-primary); font-size: 14px; }
+#carte { flex: 1; min-width: 0; height: 100%; }
+#panneau { width: 400px; height: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface-1); }
+header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+h1 { margin: 0; font-size: 18px; }
+header p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+header a { color: var(--accent); }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+button, .bouton { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
+button.principal { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.compte { font-size: 12px; color: var(--text-secondary); }
+.filtres { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.filtres input[type=search] { flex: 1; min-width: 0; font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+#liste { flex: 1; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+#liste li { display: flex; align-items: center; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+#liste li:hover { background: var(--surface-2); }
+#liste li.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#liste .nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#liste .alt { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.etat { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.etat.suspecte { color: var(--warn); background: var(--warn-bg); }
+.etat.corrigee { color: var(--good); background: var(--good-bg); }
+#fiche { border-top: 1px solid var(--border); padding: 12px 16px 16px; max-height: 58%; overflow-y: auto; background: var(--surface-2); }
+#fiche h2 { margin: 0; font-size: 15px; }
+#fiche .sous { margin: 2px 0 8px; font-size: 12px; color: var(--text-secondary); }
+#fiche iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 6px; background: var(--border); }
+.champ { display: grid; gap: 3px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+.champ input { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+.valeurs { margin-top: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.valeurs strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.aide { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; }
+/* marqueurs */
+.pt { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px #0007; background: #6b6a66; }
+.pt.suspecte { background: #e5a50a; }
+.pt.corrigee { background: #1f8a4c; }
+.pt.sel { width: 22px; height: 22px; margin: -3px 0 0 -3px; background: var(--accent); outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.fantome { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed #6b6a66; background: #fff8; }
+@media (max-width: 800px) {
+  body { flex-direction: column; }
+  #carte { height: 55vh; flex: none; }
+  #panneau { width: 100%; height: auto; border-left: 0; }
+  #liste { max-height: 40vh; }
+}
+</style>
+</head>
+<body>
+<div id="carte" aria-label="Carte des webcams"></div>
+<aside id="panneau">
+  <header>
+    <h1>Éditeur des webcams</h1>
+    <p>Glissez chaque marqueur à la position réelle de la caméra, puis exportez le fichier
+      <code>webcams_corrections.json</code> à déposer à la racine du dépôt. <a href="./">Retour à la carte</a></p>
+    <div class="actions">
+      <button id="exporter" class="principal" type="button">Exporter le fichier</button>
+      <label class="bouton" for="importer">Importer…</label>
+      <input id="importer" type="file" accept=".json,application/json" hidden>
+      <button id="reinit" type="button">Tout annuler</button>
+      <span class="compte" id="compte"></span>
+    </div>
+  </header>
+  <div class="filtres">
+    <input type="search" id="recherche" placeholder="Rechercher une webcam ou un village" aria-label="Rechercher">
+    <label><input type="checkbox" id="suspectes"> À vérifier</label>
+  </div>
+  <ul id="liste"></ul>
+  <section id="fiche" hidden>
+    <h2 id="f-titre"></h2>
+    <p class="sous" id="f-sous"></p>
+    <iframe id="f-lecteur" title="Lecteur de la webcam" loading="lazy" allowfullscreen></iframe>
+    <div class="valeurs" id="f-valeurs"></div>
+    <label class="champ">Altitude réelle de la caméra (m), si vous la connaissez
+      <input type="number" id="f-alt" min="100" max="4800" step="1" placeholder="sinon lue sur le relief">
+    </label>
+    <label class="champ">Note
+      <input type="text" id="f-note" placeholder="ex. caméra en haut du télésiège">
+    </label>
+    <div class="actions">
+      <button id="f-windy" type="button">Revenir à la position Windy</button>
+      <button id="f-annuler" type="button">Annuler la correction</button>
+    </div>
+    <p class="aide">Astuce : la vue satellite (en haut à droite de la carte) aide à repérer gares de télésiège et sommets.</p>
+  </section>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.min.js"></script>
+<script>
+(async () => {
+const $ = (id) => document.getElementById(id);
+const nf = new Intl.NumberFormat("fr-FR");
+const CLE = "editeur-webcams-v1";
+const LISEZMOI = [
+  "Corrections des webcams Windy, appliquées par pipeline.py à chaque passage (python3 pipeline.py webcams-corrections pour les appliquer tout de suite).",
+  "Clé = identifiant Windy de la webcam (dans l'URL https://windy.com/webcams/<id>, ou dans web/data/webcams.json).",
+  "Champs facultatifs : alt (altitude réelle de la caméra, m), lat et lon (position réelle, degrés décimaux, les deux ensemble), note (texte libre).",
+  "Sans alt, l'altitude est lue sur le relief à la position retenue. Les entrées dont la clé commence par _ sont ignorées.",
+  "Fichier produit par web/editeur-webcams.html."
+];
+
+// ---------------------------------------------------------------- données
+const [data, meta, reliefImg] = await Promise.all([
+  fetch("data/webcams.json", { cache: "no-cache" }).then((r) => r.json()),
+  fetch("data/meta.json").then((r) => r.json()),
+  new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = "data/relief.png"; }),
+]);
+const cams = data.webcams;
+// relief (terrarium, grille de la webapp) pour estimer l'altitude à une position
+const [GW, GH] = meta.grille_web, [X0, Y0, X1, Y1] = meta.aoi, pas = meta.pas_m;
+const cv = document.createElement("canvas"); cv.width = GW; cv.height = GH;
+const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(reliefImg, 0, 0);
+const px = cx.getImageData(0, 0, GW, GH).data;
+proj4.defs("UTM31", "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs");
+function altitude(lat, lon) {
+  const [x, y] = proj4("EPSG:4326", "UTM31", [lon, lat]);
+  if (x < X0 || x > X1 || y < Y0 || y > Y1) return null;
+  const j = Math.min(GW - 1, Math.floor((x - X0) / pas)), i = Math.min(GH - 1, Math.floor((Y1 - y) / pas)), k = 4 * (i * GW + j);
+  return Math.round(px[k] * 256 + px[k + 1] + px[k + 2] / 256 - 32768);
+}
+
+// corrections : celles déjà publiées (champ « corrige » de webcams.json), puis celles en cours (navigateur)
+const publiees = {};
+for (const c of cams) if (c.corrige) publiees[c.id] = { ...c.corrige };
+let corr = structuredClone(publiees);
+try { const s = JSON.parse(localStorage.getItem(CLE) || "null"); if (s) corr = s; } catch (e) { /* stockage indisponible */ }
+const sauver = () => { try { localStorage.setItem(CLE, JSON.stringify(corr)); } catch (e) { /* tant pis */ } majCompte(); };
+const windy = (c) => [c.lat_windy ?? c.lat, c.lon_windy ?? c.lon];
+const position = (c) => (corr[c.id] && corr[c.id].lat != null) ? [corr[c.id].lat, corr[c.id].lon] : windy(c);
+// suspectes : plusieurs webcams déclarées exactement au même point
+const cleP = (c) => windy(c).map((v) => v.toFixed(4)).join(",");
+const nbParPoint = {}; for (const c of cams) nbParPoint[cleP(c)] = (nbParPoint[cleP(c)] || 0) + 1;
+const suspecte = (c) => nbParPoint[cleP(c)] > 1;
+const etat = (c) => corr[c.id] ? "corrigee" : suspecte(c) ? "suspecte" : "";
+
+// ---------------------------------------------------------------- carte
+const carte = L.map("carte", { zoomControl: true });
+const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17,
+  attribution: "© OpenStreetMap, SRTM · style © OpenTopoMap (CC-BY-SA)" }).addTo(carte);
+const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19,
+  attribution: "Imagerie © Esri, Maxar, Earthstar Geographics" });
+L.control.layers({ "Topographique": topo, "Satellite": sat }, null, { position: "topright" }).addTo(carte);
+const [la0, lo0] = proj4("UTM31", "EPSG:4326", [X0, Y0]).reverse(), [la1, lo1] = proj4("UTM31", "EPSG:4326", [X1, Y1]).reverse();
+carte.fitBounds([[la0, lo0], [la1, lo1]]);
+L.rectangle([[la0, lo0], [la1, lo1]], { color: "#2a78d6", weight: 1, fill: false, dashArray: "4 4", interactive: false }).addTo(carte);
+
+let sel = null;
+const marqueurs = {}, fantomes = {};
+const icone = (c) => L.divIcon({ className: "", html: `<div class="pt ${etat(c)}${sel === c ? " sel" : ""}"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+function dessiner(c) {
+  const p = position(c);
+  if (!marqueurs[c.id]) {
+    const m = L.marker(p, { draggable: true, icon: icone(c), title: c.titre, autoPan: true }).addTo(carte);
+    m.on("click", () => choisir(c, false));
+    m.on("dragstart", () => choisir(c, false));
+    m.on("dragend", () => { const q = m.getLatLng(); modifier(c, { lat: +q.lat.toFixed(5), lon: +q.lng.toFixed(5) }); });
+    marqueurs[c.id] = m;
+  } else {
+    // on met à jour l'icône existante sans la remplacer (la remplacer interromprait un glisser-déposer en cours)
+    const m = marqueurs[c.id], el = m.getElement();
+    if (!m.dragging || !m.dragging.moved()) m.setLatLng(p);
+    if (el && el.firstChild) el.firstChild.className = `pt ${etat(c)}${sel === c ? " sel" : ""}`;
+  }
+  marqueurs[c.id].setZIndexOffset(sel === c ? 1000 : 0);
+  // position Windy d'origine, en pointillé, si la webcam a été déplacée
+  if (fantomes[c.id]) { fantomes[c.id].forEach((l) => l.remove()); delete fantomes[c.id]; }
+  if (corr[c.id] && corr[c.id].lat != null) {
+    const w = windy(c);
+    fantomes[c.id] = [
+      L.marker(w, { icon: L.divIcon({ className: "", html: '<div class="fantome"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }), interactive: false }).addTo(carte),
+      L.polyline([w, p], { color: "#6b6a66", weight: 1.5, dashArray: "3 4", interactive: false }).addTo(carte),
+    ];
+  }
+}
+
+// ---------------------------------------------------------------- édition
+function modifier(c, champs) {
+  const v = { ...(corr[c.id] || {}), ...champs };
+  for (const k of Object.keys(v)) if (v[k] === "" || v[k] == null) delete v[k];
+  if (Object.keys(v).length) corr[c.id] = v; else delete corr[c.id];
+  sauver(); dessiner(c); rendreListe(); rendreFiche();
+}
+function choisir(c, centrer = true) {
+  const avant = sel; sel = c;
+  if (avant) dessiner(avant);
+  dessiner(c);
+  if (centrer) carte.setView(position(c), Math.max(carte.getZoom(), 14));
+  rendreListe(); rendreFiche(true);
+}
+function rendreFiche(nouvelle = false) {
+  const f = $("fiche"); f.hidden = !sel; if (!sel) return;
+  const c = sel, p = position(c), w = windy(c), co = corr[c.id] || {};
+  $("f-titre").textContent = c.titre;
+  $("f-sous").innerHTML = `${c.ville ? c.ville + " · " : ""}identifiant <code>${c.id}</code> · <a href="${c.lien}" target="_blank" rel="noopener">voir sur Windy</a>`;
+  if (nouvelle) { if (c.lecteur) $("f-lecteur").src = c.lecteur; else $("f-lecteur").removeAttribute("src"); }
+  const zp = altitude(p[0], p[1]), zw = altitude(w[0], w[1]);
+  $("f-valeurs").innerHTML = `Position retenue : <strong>${p[0].toFixed(5)}, ${p[1].toFixed(5)}</strong>`
+    + ` · relief ≈ <strong>${zp == null ? "hors zone" : nf.format(zp) + " m"}</strong>`
+    + (co.lat != null ? `<br>Position Windy : ${w[0].toFixed(5)}, ${w[1].toFixed(5)} · relief ≈ ${zw == null ? "hors zone" : nf.format(zw) + " m"}` : "")
+    + (suspecte(c) ? `<br>⚠ ${nbParPoint[cleP(c)] - 1} autre(s) webcam(s) déclarée(s) au même point par Windy` : "");
+  if (document.activeElement !== $("f-alt")) $("f-alt").value = co.alt ?? "";
+  if (document.activeElement !== $("f-note")) $("f-note").value = co.note ?? "";
+  $("f-windy").disabled = co.lat == null; $("f-annuler").disabled = !corr[c.id];
+}
+$("f-alt").addEventListener("change", (e) => modifier(sel, { alt: e.target.value === "" ? null : Math.round(+e.target.value) }));
+$("f-note").addEventListener("change", (e) => modifier(sel, { note: e.target.value.trim() || null }));
+$("f-windy").addEventListener("click", () => modifier(sel, { lat: null, lon: null }));
+$("f-annuler").addEventListener("click", () => { delete corr[sel.id]; sauver(); dessiner(sel); rendreListe(); rendreFiche(); });
+
+// ---------------------------------------------------------------- liste
+function rendreListe() {
+  const q = $("recherche").value.trim().toLowerCase(), seulement = $("suspectes").checked;
+  const ul = $("liste"); ul.replaceChildren();
+  const tri = [...cams].sort((a, b) => (suspecte(b) - suspecte(a)) || (a.ville || "").localeCompare(b.ville || "") || a.titre.localeCompare(b.titre));
+  for (const c of tri) {
+    if (seulement && !suspecte(c) && !corr[c.id]) continue;
+    if (q && !(`${c.titre} ${c.ville || ""}`.toLowerCase().includes(q))) continue;
+    const li = document.createElement("li"); li.className = sel === c ? "sel" : ""; li.tabIndex = 0;
+    const n = document.createElement("span"); n.className = "nom"; n.textContent = c.titre; n.title = c.titre;
+    const p = position(c), z = corr[c.id] && corr[c.id].alt != null ? corr[c.id].alt : altitude(p[0], p[1]);
+    const a = document.createElement("span"); a.className = "alt"; a.textContent = z == null ? "" : `${nf.format(z)} m`;
+    li.append(n, a);
+    const e = etat(c); if (e) { const s = document.createElement("span"); s.className = "etat " + e; s.textContent = e === "corrigee" ? "corrigée" : "à vérifier"; li.appendChild(s); }
+    li.addEventListener("click", () => choisir(c));
+    li.addEventListener("keydown", (ev) => { if (ev.key === "Enter") choisir(c); });
+    ul.appendChild(li);
+  }
+}
+$("recherche").addEventListener("input", rendreListe);
+$("suspectes").addEventListener("change", rendreListe);
+function majCompte() {
+  const n = Object.keys(corr).length, s = cams.filter(suspecte).length;
+  const modif = JSON.stringify(corr) !== JSON.stringify(publiees);
+  $("compte").textContent = `${n} corrigée${n > 1 ? "s" : ""} · ${s} à vérifier${modif ? " · modifications non exportées" : ""}`;
+}
+
+// ---------------------------------------------------------------- import / export
+$("exporter").addEventListener("click", () => {
+  const ids = Object.keys(corr).sort();
+  const out = { _lisezmoi: LISEZMOI };
+  for (const id of ids) out[id] = corr[id];
+  const blob = new Blob([JSON.stringify(out, null, 1) + "\n"], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "webcams_corrections.json";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$("importer").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    corr = Object.fromEntries(Object.entries(j).filter(([k]) => !k.startsWith("_")));
+    sauver(); cams.forEach(dessiner); rendreListe(); rendreFiche();
+  } catch (err) { alert("Fichier illisible : " + err.message); }
+  e.target.value = "";
+});
+$("reinit").addEventListener("click", () => {
+  if (!confirm("Annuler toutes les modifications non exportées et revenir aux corrections publiées ?")) return;
+  corr = structuredClone(publiees); sauver(); cams.forEach(dessiner); rendreListe(); rendreFiche();
+});
+
+cams.forEach(dessiner); rendreListe(); majCompte();
+})();
+</script>
+</body>
+</html>
