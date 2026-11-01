@@ -187,10 +187,12 @@ out;"""
         pris.extend((norm(p["nom"]), p["x"], p["y"]) for p in out)
         return out
 
-    sommets = garder(sorted([p for p in pts if p["type"] == "sommet" and p["alt"]], key=lambda p: -p["alt"]), 1200, 500, 300)
+    # plafonds larges : sinon les plus hauts (Écrins, Arves) évincent les Préalpes, à hauteur de mer de nuages.
+    # La densité est gérée à l'affichage (placement sans chevauchement).
+    sommets = garder(sorted([p for p in pts if p["type"] == "sommet" and p["alt"]], key=lambda p: -p["alt"]), 1200, 500, 900)
     villes = garder(sorted([p for p in pts if p["type"] in ("city", "town")], key=lambda p: -p["pop"]), 1500, 1000, 60)
-    cols = garder(sorted([p for p in pts if p["type"] == "col"], key=lambda p: -(p["alt"] or 0)), 1500, 500, 100)
-    villages = garder(sorted([p for p in pts if p["type"] == "village"], key=lambda p: -p["pop"]), 1500, 1000, 250)
+    cols = garder(sorted([p for p in pts if p["type"] == "col"], key=lambda p: -(p["alt"] or 0)), 1200, 500, 400)
+    villages = garder(sorted([p for p in pts if p["type"] == "village"], key=lambda p: -p["pop"]), 1500, 1000, 500)
     out = []
     for p in villes + sommets + cols + villages:   # ordre = priorité d'affichage
         p = dict(p, type="lieu" if p["type"] in ("city", "town", "village") else p["type"]); p.pop("pop")
