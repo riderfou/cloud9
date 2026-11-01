@@ -168,6 +168,132 @@ function majBoutonSimulation() {
   b.disabled = state.estimate == null || state.H === state.estimate || !$("t-sea").checked;
 }
 
+// ------------------------------------------------------------------ vent : particules (à la Windy)
+// Champ AROME sur une grille régulière (vent.json) interpolé dans l'espace et dans le temps ; chaque
+// particule laisse une traînée qui s'efface, colorée selon la vitesse, posée sur le relief (vent à 10 m)
+// ou à 1 500 m (850 hPa, au-dessus de la mer de nuages).
+let vent = await getJSON("data/vent.json").catch(() => null);
+const VENT_N = matchMedia("(pointer: coarse)").matches ? 1800 : 3200;   // particules
+const VENT_T = 12;                 // points par traînée
+const VENT_ACC = 650;              // accélération du temps : 10 m/s -> 6,5 km par seconde à l'écran
+const VENT_PAS_TRAINEE = 0.05;     // s entre deux points de traînée
+// échelle de couleur (km/h), proche de celle de Windy
+const VENT_ECHELLE = [[0, [98, 113, 183]], [10, [57, 160, 202]], [20, [74, 196, 133]], [35, [168, 214, 74]],
+  [55, [240, 190, 55]], [70, [232, 104, 52]], [100, [200, 45, 110]]];
+function couleurVent(kmh) {
+  const E = VENT_ECHELLE;
+  if (kmh >= E[E.length - 1][0]) return E[E.length - 1][1];
+  for (let k = 1; k < E.length; k++) if (kmh < E[k][0]) {
+    const [a, ca] = E[k - 1], [b, cb] = E[k], f = (kmh - a) / (b - a);
+    return ca.map((c, i) => c + (cb[i] - c) * f);
+  }
+  return E[0][1];
+}
+const ventGeo = new THREE.BufferGeometry();
+const ventPos = new Float32Array(VENT_N * (VENT_T - 1) * 2 * 3);
+const ventCol = new Float32Array(VENT_N * (VENT_T - 1) * 2 * 4);
+ventGeo.setAttribute("position", new THREE.BufferAttribute(ventPos, 3).setUsage(THREE.DynamicDrawUsage));
+ventGeo.setAttribute("color", new THREE.BufferAttribute(ventCol, 4).setUsage(THREE.DynamicDrawUsage));
+const ventLignes = new THREE.LineSegments(ventGeo, new THREE.LineBasicMaterial({
+  vertexColors: true, transparent: true, depthWrite: false, fog: true }));
+ventLignes.frustumCulled = false; ventLignes.renderOrder = 3; ventLignes.visible = false;
+scene.add(ventLignes);
+// particules : position (m, UTM), âge, durée de vie, traînée (anneau de positions monde) et couleurs
+const P = Array.from({ length: VENT_N }, () => ({ x: 0, y: 0, age: 0, vie: 0, tr: new Float32Array(VENT_T * 3), nb: 0, c: [1, 1, 1] }));
+const ventEtat = { niveau: "sol", k0: 0, k1: 0, f: 0, horloge: 0, t: null };
+function ventChamp() { return vent && vent.niveaux[ventEtat.niveau]; }
+// heure affichée : maintenant, ou l'heure de l'analyse choisie dans le tableau
+function ventHeure() { return state.analysis && !state.synthese ? Date.parse(state.analysis.date_utc) : Date.now(); }
+function ventMajTemps() {
+  if (!vent) return false;
+  const t = ventHeure(), T = vent.heures.map(Date.parse);
+  if (t < T[0] - 1.8e6 || t > T[T.length - 1] + 1.8e6) return false;
+  let k = T.findIndex((x) => x > t); if (k < 0) k = T.length - 1;
+  ventEtat.k1 = Math.max(k, 0); ventEtat.k0 = Math.max(k - 1, 0);
+  ventEtat.f = ventEtat.k0 === ventEtat.k1 ? 0 : THREE.MathUtils.clamp((t - T[ventEtat.k0]) / (T[ventEtat.k1] - T[ventEtat.k0]), 0, 1);
+  ventEtat.t = t;
+  return true;
+}
+// vent (u, v en m/s) au point (x, y) : bilinéaire sur la grille, linéaire entre deux heures
+const vUV = [0, 0];
+function ventEn(x, y) {
+  const ch = ventChamp(), { nx, ny } = vent, gx = vent.x, gy = vent.y;
+  const fx = THREE.MathUtils.clamp((x - gx[0]) / (gx[nx - 1] - gx[0]) * (nx - 1), 0, nx - 1.001);
+  const fy = THREE.MathUtils.clamp((y - gy[0]) / (gy[ny - 1] - gy[0]) * (ny - 1), 0, ny - 1.001);
+  const j = Math.floor(fx), i = Math.floor(fy), a = fx - j, b = fy - i;
+  const w = [(1 - a) * (1 - b), a * (1 - b), (1 - a) * b, a * b], id = [i * nx + j, i * nx + j + 1, (i + 1) * nx + j, (i + 1) * nx + j + 1];
+  let u = 0, v = 0, ws = 0;
+  for (const [k, f] of [[ventEtat.k0, 1 - ventEtat.f], [ventEtat.k1, ventEtat.f]]) {
+    if (f === 0) continue;
+    const U = ch.u[k], V = ch.v[k];
+    for (let q = 0; q < 4; q++) { if (U[id[q]] == null) continue; u += U[id[q]] * w[q] * f; v += V[id[q]] * w[q] * f; ws += w[q] * f; }
+  }
+  vUV[0] = ws ? u / ws : 0; vUV[1] = ws ? v / ws : 0;
+  return vUV;
+}
+// altitude d'affichage : juste au-dessus du sol, ou 1 500 m (sans passer sous le relief)
+const ventZ = (x, y) => ventEtat.niveau === "sol" ? zAt(x, y) + 60 : Math.max(1500, zAt(x, y) + 60);
+function ventNaissance(p, ageAleatoire) {
+  p.x = X0 + Math.random() * Wm; p.y = Y1 - Math.random() * Hm;
+  p.vie = 2 + Math.random() * 3; p.age = ageAleatoire ? Math.random() * p.vie : 0; p.nb = 0;
+  ventPoint(p);
+}
+function ventPoint(p) {   // ajoute la position courante en tête de traînée
+  p.tr.copyWithin(3, 0, (VENT_T - 1) * 3);
+  p.tr[0] = (p.x - cx) / S; p.tr[1] = (ventZ(p.x, p.y) * state.exag) / S; p.tr[2] = -(p.y - cy) / S;
+  p.nb = Math.min(p.nb + 1, VENT_T);
+}
+function ventReinit() { for (const p of P) ventNaissance(p, true); }
+function ventAvancer(dt) {
+  ventEtat.horloge += dt;
+  const pose = ventEtat.horloge >= VENT_PAS_TRAINEE; if (pose) ventEtat.horloge = 0;
+  let n = 0;
+  for (const p of P) {
+    p.age += dt;
+    const [u, v] = ventEn(p.x, p.y);
+    p.x += u * dt * VENT_ACC; p.y += v * dt * VENT_ACC;
+    const sort = p.x < X0 || p.x > X0 + Wm || p.y > Y1 || p.y < Y1 - Hm;
+    if (p.age > p.vie || sort) { ventNaissance(p, false); }
+    else if (pose) ventPoint(p);
+    else { p.tr[0] = (p.x - cx) / S; p.tr[1] = (ventZ(p.x, p.y) * state.exag) / S; p.tr[2] = -(p.y - cy) / S; }
+    // couleur selon la vitesse ; apparition et disparition en fondu
+    const c = couleurVent(Math.hypot(u, v) * 3.6);
+    const fondu = Math.min(1, p.age / 0.4, (p.vie - p.age) / 0.6);
+    for (let s = 0; s < VENT_T - 1; s++, n++) {
+      const o = n * 6, oc = n * 8;
+      if (s + 1 >= p.nb) {   // segment pas encore tracé : dégénéré, invisible
+        ventPos.fill(0, o, o + 6); ventCol.fill(0, oc, oc + 8); continue;
+      }
+      for (let q = 0; q < 2; q++) {
+        const a = (s + q) * 3;
+        ventPos[o + q * 3] = p.tr[a]; ventPos[o + q * 3 + 1] = p.tr[a + 1]; ventPos[o + q * 3 + 2] = p.tr[a + 2];
+        const al = fondu * (1 - (s + q) / (VENT_T - 1));
+        // couleur éclaircie (35 % de blanc) : lisible sur la forêt comme sur la neige
+        ventCol.set([(c[0] * .65 + 89) / 255, (c[1] * .65 + 89) / 255, (c[2] * .65 + 89) / 255, al], oc + q * 4);
+      }
+    }
+  }
+  ventGeo.attributes.position.needsUpdate = true; ventGeo.attributes.color.needsUpdate = true;
+}
+// texte sous la case à cocher : heure, vitesse moyenne et direction dominante
+const POINTS_CARDINAUX = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
+function ventResume() {
+  const info = $("vent-info"), ok = ventMajTemps();
+  $("vent-ctrl").hidden = !vent;
+  $("t-vent").closest("label").hidden = !vent;
+  if (!vent) return;
+  if (!ok) { info.textContent = "Pas de prévision de vent à cette heure."; ventLignes.visible = false; return; }
+  ventLignes.visible = $("t-vent").checked;
+  let su = 0, sv = 0, sf = 0, n = 0;
+  for (const x of vent.x) for (const y of vent.y) { const [u, v] = ventEn(x, y); su += u; sv += v; sf += Math.hypot(u, v); n++; }
+  const kmh = Math.round((sf / n) * 3.6);
+  const dir = (Math.atan2(-su, -sv) * 180 / Math.PI + 360) % 360;   // d'où vient le vent
+  const de = kmh < 3 ? "vent calme" : `vent moyen ${kmh} km/h, de ${POINTS_CARDINAUX[Math.round(dir / 45) % 8]}`;
+  info.textContent = `${ventEtat.niveau === "sol" ? "À 10 m du sol" : "À 1 500 m (850 hPa)"} · ${fmtH.format(new Date(ventEtat.t))} · ${de} · AROME`;
+}
+$("vent-legende").innerHTML = VENT_ECHELLE.map(([k, c]) => `<span style="background:rgb(${c.map(Math.round)})">${k}</span>`).join("") + "<em>km/h</em>";
+if (vent) ventReinit();
+
 // caméra : depuis le sud-ouest, regard vers Grenoble / Grésivaudan
 const target = toWorld(723000, 5015000, 600);
 controls.target.copy(target);
@@ -306,6 +432,7 @@ async function showAnalysis(id, synthese = false) {
   setCells(VALIDE(a) ? a.mailles : []);
   document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
   renderEtat(synthese ? etatCourant() : etatDeAnalyse(a));
+  ventResume();
 }
 
 // ------------------------------------------------------------------ état courant
@@ -596,7 +723,11 @@ if (neigeMeta && neigeMat.alphaMap) {
 } else { $("t-neige").closest("label").hidden = true; }
 $("t-cells").addEventListener("change", () => updateLabels());
 $("t-cams").addEventListener("change", () => updateLabels());
-$("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); });
+$("t-exag").addEventListener("change", (e) => { state.exag = e.target.checked ? 1.5 : 1; applyHeights(); setH(state.H); if (vent) ventReinit(); });
+$("t-vent").addEventListener("change", () => ventResume());
+document.querySelectorAll("input[name=niveau-vent]").forEach((r) => r.addEventListener("change", (e) => {
+  ventEtat.niveau = e.target.value; ventReinit(); ventResume();
+}));
 const afficherMaj = () => { $("maj").textContent = `mis à jour ${fmtH.format(new Date(hist.maj_utc))}`; };
 afficherMaj();
 
@@ -625,6 +756,10 @@ async function rafraichir() {
     if (h.maj_utc !== hist.maj_utc) {
       hist = h;
       arome = await getJSON("data/arome.json").catch(() => arome);
+      const ancienVent = vent;
+      vent = await getJSON("data/vent.json").catch(() => vent);
+      if (vent && !vent.niveaux[ventEtat.niveau]) ventEtat.niveau = "sol";
+      if (vent && !ancienVent) ventReinit();
       afficherMaj(); renderTable();
       const id = idCourant();
       if (state.synthese && id) await showAnalysis(id, true);
@@ -634,6 +769,7 @@ async function rafraichir() {
       }
     } else if (state.synthese) renderEtat(etatCourant());   // l'âge de la mesure change : direct -> médiane -> prévision
     renderChart();   // le repère « maintenant » avance même sans nouvelles données
+    ventResume();
   } catch (e) {
     console.warn("rafraîchissement impossible", e);   // hors ligne... : on réessaiera au prochain tour
   } finally { enCours = false; }
@@ -682,7 +818,13 @@ function majBoussole() {
 }
 
 const clock = new THREE.Clock();
+// niveau 850 hPa absent du fichier : pas de choix d'altitude
+if (vent && !vent.niveaux["1500m"]) document.querySelector(".niveaux-vent").hidden = true;
+ventResume();
+setInterval(() => { if (state.synthese || !state.analysis) ventResume(); }, 60e3);   // interpolation horaire
 renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (ventLignes.visible && document.visibilityState === "visible") ventAvancer(dt);
   seaMat.uniforms.uTime.value = clock.getElapsedTime();
   avancerAnimation();
   controls.update(); renderer.render(scene, camera); updateLabels(); majBoussole();

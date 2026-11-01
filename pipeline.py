@@ -7,6 +7,7 @@ Pipeline mer2nuages : produit les données de la webapp dans web/data/.
   python3 pipeline.py mtg [AAAA-MM-JJ]    # Meteosat MTG toutes les 30 min, visible le jour, infrarouge la nuit
                                           # (sans date : 6 dernières heures ; avec date : la journée UTC entière)
   python3 pipeline.py arome               # prévision AROME (Open-Meteo)
+  python3 pipeline.py vent                # champ de vent AROME sur la zone (animation de la webapp)
   python3 pipeline.py tout                # viirs du jour + s2 + arome + index
 
 À lancer toutes les 30 min entre 11 h et 15 h UTC (VIIRS) et toutes les 3 h (AROME).
@@ -540,6 +541,58 @@ def run_arome(lat=45.25, lon=5.85):
     print("AROME OK", len(heures), "heures, niveaux", niveaux)
 
 
+# ------------------------------------------------------------------ vent (champ AROME sur la zone)
+VENT_NIVEAUX = {"sol": "10m", "1500m": "850hPa"}   # nom dans vent.json -> suffixe Open-Meteo
+
+
+def run_vent(nx=11, ny=11):
+    """Champ de vent AROME sur une grille régulière nx × ny de la zone (UTM), pour l'animation de particules
+    de la webapp : composantes u (vers l'est) et v (vers le nord) en m/s, heure par heure, à 10 m et à 850 hPa.
+    Une requête Open-Meteo multi-points (compte pour nx × ny appels dans le quota quotidien)."""
+    X0, Y0, X1, Y1 = m2n.AOI
+    xs = [X0 + (X1 - X0) * (j + .5) / nx for j in range(nx)]
+    ys = [Y0 + (Y1 - Y0) * (i + .5) / ny for i in range(ny)]          # du sud au nord
+    gx, gy = [x for y in ys for x in xs], [y for y in ys for x in xs]  # ligne par ligne, du sud au nord
+    lon, lat = wtransform(m2n.CRS, "EPSG:4326", gx, gy)
+
+    def appel(niveaux):
+        var = [f"wind_{g}_{s}" for s in niveaux.values() for g in ("speed", "direction")]
+        r = requests.get("https://api.open-meteo.com/v1/meteofrance", timeout=90, params={
+            "latitude": ",".join(f"{v:.4f}" for v in lat), "longitude": ",".join(f"{v:.4f}" for v in lon),
+            "hourly": ",".join(var), "wind_speed_unit": "ms", "past_days": 0, "forecast_days": 2,
+            "timezone": "UTC"}).json()
+        return r if isinstance(r, list) else [r] if "hourly" in r else r
+    niveaux = dict(VENT_NIVEAUX)
+    r = appel(niveaux)
+    if not isinstance(r, list):   # niveau d'altitude refusé ? on garde le vent à 10 m
+        print("Vent : requête complète refusée :", r.get("reason", r))
+        niveaux = {"sol": "10m"}; r = appel(niveaux)
+    if not isinstance(r, list) or len(r) != nx * ny:
+        print("Vent indisponible :", r.get("reason", r) if isinstance(r, dict) else f"{len(r)} points"); return
+    temps = r[0]["hourly"]["time"]
+    out = {}
+    for nom, s in niveaux.items():
+        U, V = [], []
+        for k in range(len(temps)):
+            u, v = [], []
+            for p in r:
+                f, d = p["hourly"].get(f"wind_speed_{s}", [None])[k], p["hourly"].get(f"wind_direction_{s}", [None])[k]
+                if f is None or d is None:
+                    u.append(None); v.append(None); continue
+                a = np.radians(d)              # direction d'où vient le vent
+                u.append(round(float(-f * np.sin(a)), 1)); v.append(round(float(-f * np.cos(a)), 1))
+            U.append(u); V.append(v)
+        if any(x is not None for row in U for x in row):
+            out[nom] = {"u": U, "v": V}
+    if not out:
+        print("Vent : aucune valeur"); return
+    write_json("vent.json", {"source": "AROME Météo-France via Open-Meteo", "unite": "m/s",
+                             "maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
+                             "nx": nx, "ny": ny, "x": [round(x) for x in xs], "y": [round(y) for y in ys],
+                             "heures": [t + ":00+00:00" for t in temps], "niveaux": out})
+    print("Vent OK", len(temps), "heures,", nx * ny, "points, niveaux", list(out))
+
+
 # ------------------------------------------------------------------ index
 def index():
     recs = []
@@ -567,6 +620,7 @@ if __name__ == "__main__":
         else:
             run_mtg()
     elif cmd == "arome": run_arome()
+    elif cmd == "vent": run_vent()
     elif cmd == "webcams": run_webcams(age_max_h=0)
     elif cmd == "webcams-corrections": run_webcams(age_max_h=10 ** 6)   # réapplique les corrections sans requête
     elif cmd == "obs": run_obs_mf()
@@ -575,5 +629,5 @@ if __name__ == "__main__":
         a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)
     elif cmd == "tout":
         if not os.path.exists(os.path.join(OUT, "relief.png")): statique()
-        run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome(); run_webcams()
+        run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome(); run_vent(); run_webcams()
     if cmd != "statique": index()

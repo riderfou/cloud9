@@ -49,6 +49,7 @@ jobs:
             python3 pipeline.py s2 5 || true
           fi
           python3 pipeline.py arome || true
+          python3 pipeline.py vent || true
           python3 -c "import pipeline; pipeline.run_webcams()" || true
           python3 pipeline.py obs || true
           python3 pipeline.py index
