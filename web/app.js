@@ -84,7 +84,7 @@ const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, r
 scene.add(terrain);
 
 // nuage observé (fraction nuageuse satellite, drapée sur le relief)
-const obsMat = new THREE.MeshBasicMaterial({ color: 0xff7a3d, transparent: true, opacity: 0.42, depthWrite: false,
+const obsMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
 const obsMesh = new THREE.Mesh(geo, obsMat); obsMesh.visible = false; scene.add(obsMesh);
 
@@ -162,12 +162,16 @@ const ST_TXT = { dessus: "au-dessus", bord: "au niveau du bord", dessous: "dans 
 function renderPeaks() {
   for (const { s, L } of peakLabels) {
     const st = statusOf(s.alt);
-    L.el.className = "lbl " + (st === "dessous" ? "dessous" : st === "bord" ? "bord" : "");
+    L.el.className = "lbl " + (!sea.visible ? "" : st === "dessous" ? "dessous" : st === "bord" ? "bord" : "");
     L.el.innerHTML = `${s.nom} <small>${nf.format(s.alt)} m</small>`;
   }
   const ul = $("peaks"); ul.replaceChildren();
+  $("peaks-note").hidden = sea.visible;
   for (const s of [...lieux].sort((a, b) => b.alt - a.alt)) {
     const st = statusOf(s.alt), li = document.createElement("li");
+    if (!sea.visible) { const n = document.createElement("span"); n.textContent = s.nom;
+      const al = document.createElement("span"); al.className = "alt"; al.textContent = `${nf.format(s.alt)} m`;
+      li.append(n, al); ul.appendChild(li); continue; }
     const name = document.createElement("span"); name.textContent = s.nom;
     const alt = document.createElement("span"); alt.className = "alt"; alt.textContent = `${nf.format(s.alt)} m`;
     const chip = document.createElement("span"); chip.className = "st " + st;
@@ -198,74 +202,127 @@ async function showAnalysis(id, synthese = false) {
   const a = await getJSON(`data/analyses/${id}.json`);
   state.analysis = a; state.synthese = synthese;
   const img = await loadImage(`data/${a.masque}`);
-  const t = new THREE.Texture(img); t.needsUpdate = true; t.flipY = true;
+  // léger flou : les pixels satellite (375-500 m) donnent sinon un rendu en escalier
+  const cvm = document.createElement("canvas"); cvm.width = img.width; cvm.height = img.height;
+  const cm = cvm.getContext("2d"); cm.filter = "blur(1.5px)"; cm.drawImage(img, 0, 0);
+  const t = new THREE.CanvasTexture(cvm); t.flipY = true;
   if (obsMat.alphaMap) obsMat.alphaMap.dispose();
   obsMat.alphaMap = t; obsMat.needsUpdate = true;
   setCells(a.detectee ? a.mailles : []);
   document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
-  renderHero(a, synthese ? syntheseRecente() : null);
+  renderEtat(synthese ? etatCourant() : etatDeAnalyse(a));
 }
 
-// Médiane des détections des FENETRE_H heures qui précèdent la dernière détection (tous capteurs) :
-// une image isolée (soleil bas, bord de nappe fragmenté...) ne fait pas basculer la valeur affichée.
-const FENETRE_H = 3;
+// ------------------------------------------------------------------ état courant
+// Priorité au temps réel : la dernière image si elle est récente ; sinon la médiane des mesures du
+// même régime (sans mélanger une nappe nette et une nappe disloquée) ; sinon la prévision AROME,
+// pondérée par le diagnostic de masse d'air (stabilité, vent, pluie).
+const AGE_DIRECT_MIN = 90, AGE_MEDIANE_H = 3;
 const fmtHM = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" });
 const mediane = (xs) => { const s = [...xs].sort((p, q) => p - q), k = s.length >> 1; return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2; };
-function syntheseRecente() {
-  const det = hist.analyses.filter((a) => a.detectee && a.sommet_m != null);
-  if (!det.length) return null;
-  const t1 = Math.max(...det.map((a) => Date.parse(a.date_utc)));
-  const sel = det.filter((a) => Date.parse(a.date_utc) > t1 - FENETRE_H * 3.6e6);
-  return {
-    sommet_m: Math.round(mediane(sel.map((a) => a.sommet_m))),
-    incertitude_m: Math.round(mediane(sel.map((a) => a.incertitude_m))),
-    n: sel.length, t0: Math.min(...sel.map((a) => Date.parse(a.date_utc))), t1,
-    capteurs: [...new Set(sel.map((a) => a.capteur))],
-  };
+const situationDe = (a) => a.situation || (a.detectee ? "mer" : "indetermine");
+const VALIDE = (a) => a.detectee && a.sommet_m != null;
+const SIT = {
+  mer:        { chip: "good", court: null,                  txt: "✓ Mer de nuages" },
+  degradee:   { chip: "warn", court: "se dégrade",          txt: "⚠ Mer de nuages qui se dégrade : des nuages accrochent les sommets" },
+  disloquee:  { chip: "warn", court: "disloquée",           txt: "Pas de mer de nuages : nappe disloquée, nuages accrochés aux sommets" },
+  couvert:    { chip: "info", court: "ciel couvert",        txt: "Pas de mer de nuages : ciel couvert" },
+  degage:     { chip: "info", court: "pas de nuages bas",   txt: "Pas de mer de nuages : pas de nuages bas" },
+  indetermine:{ chip: "info", court: "non détectée",        txt: "Pas de mer de nuages nette sur cette image" },
+};
+const AIR = { favorable: "favorable", limite: "limite", defavorable: "défavorable", inconnu: "inconnue" };
+function ageTxt(ms) {
+  const min = Math.round(ms / 60e3);
+  return min < 60 ? `il y a ${min} min` : min < 36 * 60 ? `il y a ${Math.round(min / 60)} h` : `le ${fmtH.format(new Date(Date.now() - ms))}`;
+}
+function heureArome(t = Date.now()) {
+  if (!arome) return null;
+  let best = null;
+  for (const h of arome.heures) { const d = Math.abs(Date.parse(h.t) - t); if (!best || d < best.d) best = { d, h }; }
+  return best && best.d < 3 * 3.6e6 ? best.h : null;
+}
+function texteAir(air) {
+  if (!air || !air.diagnostic || air.diagnostic === "inconnu") return "";
+  const det = [...(air.raisons || [])];
+  if (!det.length) {
+    if (air.inversion) det.push(`inversion vers ${nf.format(air.inversion.base_m)}-${nf.format(air.inversion.sommet_m)} m`);
+    else if (air.gradient_c_km != null) det.push("air stable");
+    if (air.vent850_kmh != null) det.push(`vent faible (${Math.round(air.vent850_kmh)} km/h)`);
+  }
+  return `Masse d'air ${AIR[air.diagnostic]}${det.length ? " : " + det.join(", ") : ""} (AROME)`;
+}
+// mesures valides consécutives qui finissent par `fin` (même régime), sur AGE_MEDIANE_H heures au plus
+function regime(fin) {
+  const tri = [...hist.analyses].sort((p, q) => Date.parse(p.date_utc) - Date.parse(q.date_utc));
+  const out = [];
+  for (let i = tri.findIndex((x) => x.id === fin.id); i >= 0; i--) {
+    const x = tri[i];
+    if (Date.parse(fin.date_utc) - Date.parse(x.date_utc) > AGE_MEDIANE_H * 3.6e6) break;
+    if (!VALIDE(x)) { if (situationDe(x) === "indetermine") continue; break; }
+    out.push(x);
+  }
+  return out;
+}
+function etatCourant() {
+  const now = Date.now(), ah = heureArome(), air = ah && ah.air;
+  const tri = [...hist.analyses].sort((p, q) => Date.parse(p.date_utc) - Date.parse(q.date_utc));
+  // dernière image exploitable (une image "indéterminée" ne masque pas la précédente)
+  const L = [...tri].reverse().find((x) => situationDe(x) !== "indetermine") || tri[tri.length - 1];
+  const age = L ? now - Date.parse(L.date_utc) : Infinity;
+  if (L && age <= AGE_MEDIANE_H * 3.6e6) {
+    if (!VALIDE(L)) return { mode: "situation", situation: situationDe(L), src: L, age, air };
+    if (age <= AGE_DIRECT_MIN * 60e3) return { mode: "mesure", situation: situationDe(L), sommet: L.sommet_m, incert: L.incertitude_m, src: L, age, air };
+    const r = regime(L);
+    return { mode: "mediane", situation: situationDe(L), sommet: Math.round(mediane(r.map((x) => x.sommet_m))),
+             incert: Math.round(mediane(r.map((x) => x.incertitude_m))), n: r.length, src: L, age, air,
+             capteurs: [...new Set(r.map((x) => x.capteur))] };
+  }
+  // pas d'image récente (nuit, panne) : prévision
+  return { mode: "prevision", sommet: ah ? ah.sommet_lisse_m : null, air, src: L, age };
+}
+function etatDeAnalyse(a) {
+  return VALIDE(a) ? { mode: "analyse", situation: situationDe(a), sommet: a.sommet_m, incert: a.incertitude_m, src: a }
+                   : { mode: "analyse", situation: situationDe(a), src: a, air: (heureArome(Date.parse(a.date_utc)) || {}).air };
 }
 
-function renderHero(a, syn = null) {
-  const now = Date.now();
-  const recentDet = (a && a.detectee) || syn;
-  const chip = $("hero-chip");
-  if (recentDet) {
-    const v = syn || a;
-    state.estimate = v.sommet_m; state.sigma = v.incertitude_m;
-    $("hero-num").textContent = nf.format(v.sommet_m);
-    $("hero-pm").textContent = `± ${v.incertitude_m}`;
-    if (syn && syn.n > 1) {
-      $("hero-label").textContent = `Sommet de la mer de nuages (médiane sur ${FENETRE_H} h)`;
-      $("hero-src").textContent = `${syn.n} mesures · ${syn.capteurs.join(", ")} · ${fmtH.format(new Date(syn.t0))} → ${fmtHM.format(new Date(syn.t1))}`;
-    } else {
-      const b = syn ? hist.analyses.find((x) => Date.parse(x.date_utc) === syn.t1) : a;
-      $("hero-label").textContent = "Sommet de la mer de nuages (mesuré)";
-      $("hero-src").textContent = `${b.capteur} · ${b.satellite} · ${fmtH.format(new Date(b.date_utc))}`;
-    }
-    const ageH = (now - (syn ? syn.t1 : Date.parse(a.date_utc))) / 3.6e6;
-    chip.className = "chip good"; chip.textContent = ageH < 30 ? "✓ Mer de nuages détectée" : "✓ Mer de nuages détectée (mesure ancienne)";
-    setH(v.sommet_m);
+function renderEtat(e) {
+  state.etat = e;
+  const chip = $("hero-chip"), unit = document.querySelector(".hero-value .unit");
+  const avecValeur = e.sommet != null && (e.mode !== "prevision" || (e.air && e.air.diagnostic !== "defavorable"));
+  const srcTxt = (a) => `${a.capteur} · ${a.satellite} · ${fmtH.format(new Date(a.date_utc))}`;
+  $("hero-num").textContent = avecValeur ? nf.format(e.sommet) : "—";
+  $("hero-pm").textContent = avecValeur && e.incert ? `± ${e.incert}` : "";
+  unit.hidden = !avecValeur;
+  state.estimate = avecValeur ? e.sommet : null; state.sigma = avecValeur ? e.incert : null;
+  if (e.mode === "prevision") {
+    const diag = e.air ? e.air.diagnostic : "inconnu";
+    $("hero-label").textContent = "Sommet prévu de la mer de nuages (AROME)";
+    $("hero-src").textContent = e.src ? `Pas d'image récente · dernière : ${srcTxt(e.src)}` : "Aucune image analysée";
+    chip.className = "chip " + (diag === "favorable" ? "good" : diag === "defavorable" ? "info" : "warn");
+    chip.textContent = diag === "favorable" ? "Conditions favorables" : diag === "defavorable" ? "Mer de nuages peu probable" : "Conditions incertaines";
   } else {
-    // pas de détection sur l'analyse choisie : on affiche la prévision AROME la plus proche de maintenant
-    const fc = aromeNow();
-    state.sigma = null;
-    $("hero-label").textContent = fc ? "Sommet de la couche humide (prévision AROME)" : "Sommet de la mer de nuages";
-    $("hero-num").textContent = fc ? nf.format(fc.v) : "—";
-    $("hero-pm").textContent = "";
-    $("hero-src").textContent = a ? `Dernière image : ${a.capteur} · ${a.satellite} · ${fmtH.format(new Date(a.date_utc))}` : "Aucune image analysée";
-    chip.className = a ? "chip info" : "chip warn";
-    chip.textContent = a ? "Pas de mer de nuages détectée sur cette image" : "Pas encore de mesure";
-    state.estimate = fc ? fc.v : null;
-    setH(fc ? fc.v : 200);
+    const sit = SIT[e.situation] || SIT.indetermine;
+    $("hero-label").textContent = e.mode === "mediane" ? `Sommet de la mer de nuages (médiane de ${e.n} mesure${e.n > 1 ? "s" : ""})`
+      : "Sommet de la mer de nuages";
+    $("hero-src").textContent = e.mode === "analyse" ? srcTxt(e.src)
+      : e.mode === "mediane" ? `${e.capteurs.join(", ")} · dernière mesure ${ageTxt(e.age)} (${fmtHM.format(new Date(e.src.date_utc))})`
+      : `${e.src.capteur} · ${e.src.satellite} · ${ageTxt(e.age)} (${fmtHM.format(new Date(e.src.date_utc))})`;
+    chip.className = "chip " + sit.chip; chip.textContent = sit.txt;
   }
+  $("hero-air").textContent = texteAir(e.air);
+  const valide = avecValeur && (e.mode === "prevision" ? e.air && e.air.diagnostic !== "defavorable" : SIT[e.situation] && e.situation in { mer: 1, degradee: 1 });
+  appliquerCalques(valide, e.mode !== "prevision" && e.src);
+  setH(avecValeur ? e.sommet : state.H);
 }
-function aromeNow() {
-  if (!arome) return null;
-  const now = Date.now(); let best = null;
-  for (const h of arome.heures) {
-    const d = Math.abs(Date.parse(h.t) - now);
-    if (h.sommet_lisse_m != null && (!best || d < best.d)) best = { d, v: h.sommet_lisse_m };
-  }
-  return best && best.d < 3 * 3.6e6 ? best : null;
+// Nappe simulée seulement s'il y a une mer de nuages ; sinon on montre le nuage réellement observé.
+// Appliqué seulement quand la situation change : l'utilisateur garde la main sur les cases à cocher.
+function appliquerCalques(valide, avecImage) {
+  const cle = `${valide}|${!!avecImage}`;
+  if (state.cleCalques === cle) return;
+  state.cleCalques = cle;
+  $("t-sea").checked = sea.visible = !!valide;
+  $("t-obs").checked = obsMesh.visible = !valide && !!avecImage;
+  renderPeaks();
 }
 
 // ------------------------------------------------------------------ tableau des analyses
@@ -276,8 +333,10 @@ function renderTable() {
     const c1 = document.createElement("td"); c1.textContent = fmtH.format(new Date(a.date_utc));
     const c2 = document.createElement("td"); c2.textContent = `${a.capteur} ${a.satellite}`;
     const c3 = document.createElement("td"); c3.className = "num";
-    if (a.detectee) c3.textContent = `${nf.format(a.sommet_m)} ± ${a.incertitude_m} m`;
-    else { c3.textContent = "non détectée"; c3.classList.add("nd"); }
+    const sit = situationDe(a);
+    if (VALIDE(a)) c3.textContent = `${nf.format(a.sommet_m)} ± ${a.incertitude_m} m${sit === "degradee" ? " ⚠" : ""}`;
+    else { c3.textContent = (SIT[sit] || SIT.indetermine).court; c3.classList.add("nd"); }
+    if (sit === "degradee") c3.title = "Mer de nuages qui se dégrade : des nuages accrochent les sommets";
     tr.append(c1, c2, c3);
     tr.addEventListener("click", () => showAnalysis(a.id));
     tr.addEventListener("keydown", (e) => { if (e.key === "Enter") showAnalysis(a.id); });
@@ -290,7 +349,8 @@ function renderChart() {
   const W = 344, Hh = 190, m = { l: 40, r: 8, t: 8, b: 22 };
   const now = Date.now();
   const t0 = now - 48 * 3.6e6, t1 = now + 30 * 3.6e6;
-  const obs = hist.analyses.filter((a) => a.detectee && Date.parse(a.date_utc) >= t0);
+  const recents = hist.analyses.filter((a) => Date.parse(a.date_utc) >= t0);
+  const obs = recents.filter(VALIDE), sansMer = recents.filter((a) => !VALIDE(a) && situationDe(a) !== "indetermine");
   const fc = (arome ? arome.heures : []).filter((h) => { const t = Date.parse(h.t); return t >= t0 && t <= t1; });
   const vals = [...obs.map((a) => a.sommet_m + a.incertitude_m), ...fc.map((h) => h.sommet_lisse_m).filter((x) => x != null), 1500];
   const yMax = Math.ceil(Math.max(...vals) / 500) * 500, yMin = 0;
@@ -299,6 +359,7 @@ function renderChart() {
   const ns = "http://www.w3.org/2000/svg";
   const el = (tag, at, parent) => { const e = document.createElementNS(ns, tag); for (const k in at) e.setAttribute(k, at[k]); parent && parent.appendChild(e); return e; };
   const svg = el("svg", { viewBox: `0 0 ${W} ${Hh}`, role: "img", "aria-label": "Altitude du sommet de la mer de nuages : mesures satellite et prévision AROME" });
+  const fond = el("g", {}, svg);   // bandes « air défavorable », sous la grille
   const grid = el("g", { class: "grid" }, svg), axis = el("g", { class: "axis" }, svg);
   for (let z = 0; z <= yMax; z += 500) {
     el("line", { x1: m.l, x2: W - m.r, y1: Y(z), y2: Y(z) }, grid);
@@ -312,6 +373,14 @@ function renderChart() {
       if (hh === 0) el("line", { x1: X(t), x2: X(t), y1: m.t, y2: Hh - m.b }, grid);
     }
   }
+  // fond : heures où la masse d'air est défavorable (gris foncé) ou limite (gris clair)
+  for (const h of fc) {
+    const dg = h.air && h.air.diagnostic;
+    if (dg !== "defavorable" && dg !== "limite") continue;
+    const tx = Date.parse(h.t);
+    el("rect", { x: X(tx - 1.8e6), y: m.t, width: X(tx + 1.8e6) - X(tx - 1.8e6) + 0.2, height: Hh - m.t - m.b,
+                 class: dg === "defavorable" ? "air-defav" : "air-limite" }, fond);
+  }
   const nowG = el("g", { class: "now" }, svg);
   el("line", { x1: X(now), x2: X(now), y1: m.t, y2: Hh - m.b }, nowG);
   el("text", { x: X(now) + 3, y: m.t + 9 }, nowG).textContent = "maintenant";
@@ -324,9 +393,13 @@ function renderChart() {
   el("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
   // observations : point + barre d'incertitude
   for (const a of obs) {
-    const x = X(Date.parse(a.date_utc));
-    el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-2)", "stroke-width": 2 }, svg);
-    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur === "MTG-FCI" ? 3 : 4.5, fill: "var(--series-2)", stroke: "var(--surface-1)", "stroke-width": a.capteur === "MTG-FCI" ? 1 : 2 }, svg);
+    const x = X(Date.parse(a.date_utc)), deg = situationDe(a) === "degradee";
+    el("line", { x1: x, x2: x, y1: Y(a.sommet_m - a.incertitude_m), y2: Y(a.sommet_m + a.incertitude_m), stroke: "var(--series-2)", "stroke-width": 2, opacity: deg ? 0.45 : 1 }, svg);
+    el("circle", { cx: x, cy: Y(a.sommet_m), r: a.capteur === "MTG-FCI" ? 3 : 4.5, fill: "var(--series-2)", "fill-opacity": deg ? 0.45 : 1, stroke: "var(--surface-1)", "stroke-width": a.capteur === "MTG-FCI" ? 1 : 2 }, svg);
+  }
+  // images sans mer de nuages : marqueur creux sur la ligne de base (l'altitude n'a pas de sens)
+  for (const a of sansMer) {
+    el("circle", { cx: X(Date.parse(a.date_utc)), cy: Y(0) - 5, r: 3, fill: "var(--surface-1)", stroke: "var(--text-muted)", "stroke-width": 1.5 }, svg);
   }
   // survol : réticule vertical + infobulle
   const hair = el("line", { y1: m.t, y2: Hh - m.b, stroke: "var(--text-muted)", "stroke-width": 1, visibility: "hidden" }, svg);
@@ -336,7 +409,7 @@ function renderChart() {
     const r = svg.getBoundingClientRect(), sx = ((e.clientX - r.left) / r.width) * W;
     const t = t0 + ((sx - m.l) / (W - m.l - m.r)) * (t1 - t0);
     const h = fc.reduce((b, x) => (Math.abs(Date.parse(x.t) - t) < Math.abs(Date.parse(b.t) - t) ? x : b), fc[0]);
-    const o = obs.filter((a) => Math.abs(Date.parse(a.date_utc) - t) < 1.5 * 3.6e6)
+    const o = [...obs, ...sansMer].filter((a) => Math.abs(Date.parse(a.date_utc) - t) < 1.5 * 3.6e6)
       .sort((a, b) => Math.abs(Date.parse(a.date_utc) - t) - Math.abs(Date.parse(b.date_utc) - t))[0];
     if (!h) return;
     hair.setAttribute("x1", X(Date.parse(h.t))); hair.setAttribute("x2", X(Date.parse(h.t))); hair.setAttribute("visibility", "visible");
@@ -347,12 +420,19 @@ function renderChart() {
       const b = document.createElement("strong"); b.textContent = val; const l = document.createElement("span"); l.textContent = lab;
       d.append(s, b, l); tip.appendChild(d); };
     row("var(--series-1)", h.sommet_lisse_m != null ? `${nf.format(h.sommet_lisse_m)} m` : "—", "AROME");
-    if (o) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, `${o.satellite} ${new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(o.date_utc))}`);
+    if (h.air && h.air.diagnostic && h.air.diagnostic !== "inconnu")
+      row("var(--grid)", `air ${AIR[h.air.diagnostic]}`, (h.air.raisons || []).join(", "));
+    if (o) {
+      const lab = `${o.satellite} ${fmtHM.format(new Date(o.date_utc))}`;
+      if (VALIDE(o)) row("var(--series-2)", `${nf.format(o.sommet_m)} ± ${o.incertitude_m} m`, lab + (situationDe(o) === "degradee" ? " · se dégrade" : ""));
+      else row("var(--text-muted)", (SIT[situationDe(o)] || SIT.indetermine).court, lab);
+    }
     tip.hidden = false; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY - 10}px`;
   });
   hit.addEventListener("pointerleave", () => { tip.hidden = true; hair.setAttribute("visibility", "hidden"); });
   $("chart").replaceChildren(svg);
-  $("chart-legend").innerHTML = `<span><i class="l-dot"></i>Mesure satellite</span><span><i class="l-line"></i>Prévision AROME</span>`;
+  $("chart-legend").innerHTML = `<span><i class="l-dot"></i>Mesure satellite</span><span><i class="l-hollow"></i>Pas de mer de nuages</span>`
+    + `<span><i class="l-line"></i>Prévision AROME</span><span><i class="l-band"></i>Air défavorable</span>`;
 }
 
 // ------------------------------------------------------------------ interface
@@ -372,8 +452,9 @@ function resize() {
 addEventListener("resize", resize); resize();
 
 renderTable(); renderChart();
-const startId = hist.derniere_detection || hist.derniere_analyse;
-if (startId) await showAnalysis(startId, true); else renderHero(null);
+// image affichée par défaut : celle qui fonde l'état courant (la plus récente exploitable)
+const idCourant = () => { const e = etatCourant(); return (e.src && e.src.id) || hist.derniere_analyse; };
+if (idCourant()) await showAnalysis(idCourant(), true); else renderEtat(etatCourant());
 $("loading").remove();
 
 // ------------------------------------------------------------------ rafraîchissement automatique
@@ -390,13 +471,13 @@ async function rafraichir() {
       hist = h;
       arome = await getJSON("data/arome.json").catch(() => arome);
       afficherMaj(); renderTable();
-      const id = hist.derniere_detection || hist.derniere_analyse;
+      const id = idCourant();
       if (state.synthese && id) await showAnalysis(id, true);
       else if (state.analysis) {
         document.querySelectorAll("#analyses tr").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === state.analysis.id));
-        renderHero(state.analysis);
+        renderEtat(etatDeAnalyse(state.analysis));
       }
-    }
+    } else if (state.synthese) renderEtat(etatCourant());   // l'âge de la mesure change : direct -> médiane -> prévision
     renderChart();   // le repère « maintenant » avance même sans nouvelles données
   } catch (e) {
     console.warn("rafraîchissement impossible", e);   // hors ligne... : on réessaiera au prochain tour
