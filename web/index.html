@@ -65,6 +65,7 @@
     <div class="hero-value"><span id="hero-num">—</span><span class="unit"> m</span><span class="pm" id="hero-pm"></span></div>
     <div class="hero-src" id="hero-src"></div>
     <div class="chip" id="hero-chip"></div>
+    <div class="hero-air" id="hero-air"></div>
   </section>
 
   <section class="controls">
@@ -91,6 +92,7 @@
 
   <section>
     <h2>Au-dessus de la mer ?</h2>
+    <p class="note" id="peaks-note" hidden>Pas de nappe affichée : la position des sommets par rapport à la mer de nuages n'a pas de sens. Cochez « Nappe simulée » pour explorer une altitude.</p>
     <ul id="peaks" class="peaks"></ul>
   </section>
 
@@ -108,8 +110,11 @@
       (brillants dans le visible <em>et</em> à 1,6 µm, là où la neige est sombre), puis on lit l'altitude du relief
       là où le terrain émerge du nuage. Avec VIIRS (375 m), on utilise la fraction nuageuse de chaque pixel de bord et le
       MNT à 20 m à l'intérieur du pixel.</p>
-    <p>Sources : NOAA VIIRS (Suomi-NPP, NOAA-20, NOAA-21) et Sentinel-2 L2A via AWS Open Data, Copernicus DEM GLO-30,
-      AROME Météo-France via Open-Meteo. Valeurs expérimentales, non validées par des mesures au sol.</p>
+    <p>Pour vérifier qu'il s'agit bien d'une mer de nuages, on contrôle sur l'image que le relief nettement au-dessus du
+      sommet estimé est dégagé. Sinon, la nappe se dégrade ou s'est disloquée et l'altitude n'a plus de sens. En parallèle,
+      le profil AROME indique si la masse d'air est favorable : air stable ou inversion de température, peu de vent, pas de pluie.</p>
+    <p>Sources : Meteosat MTG (EUMETSAT), NOAA VIIRS (Suomi-NPP, NOAA-20, NOAA-21) et Sentinel-2 L2A via AWS Open Data,
+      Copernicus DEM GLO-30, AROME Météo-France via Open-Meteo. Valeurs expérimentales, non validées par des mesures au sol.</p>
   </section>
 </aside>
 

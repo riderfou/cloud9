@@ -58,6 +58,38 @@ python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte
 python3 mtg.py analyser 2026-10-31T10:50                     # avec identifiants -> out/mtg_*.png
 ```
 
+## Situation : mer de nuages ou pas ? (`situation.py`)
+
+Une image où l'on trouve des « bords » de nuage n'est pas forcément une mer de nuages. Deux diagnostics indépendants :
+
+- **Satellite.** On calcule la part du relief couverte au-dessus de H + 300 m et au-dessous de H − 300 m :
+  - mer de nuages : moins de 15 % au-dessus ;
+  - nappe qui se dégrade : 15 à 35 % ;
+  - disloquée : plus de 35 % au-dessus, ou moins de 45 % au-dessous ;
+  - couvert : plus de 85 % de toute la zone couverte ;
+  - pas de nuages bas : moins de 8 % couvert.
+
+  Seules les deux premières situations donnent une altitude.
+- **Masse d'air (AROME).** Décroissance de la température entre le fond de vallée et environ 2 000 m (stable si ≤ 4 °C/km
+  ou en cas d'inversion, instable si ≥ 6 °C/km), vent à 850 hPa (gêne à partir de 25 km/h, fort à partir de 40 km/h)
+  et pluie. Résultat : favorable, limite ou défavorable.
+
+Cas du 01/11/2026 : la nappe monte de 1 620 à 2 085 m dans la matinée, puis se disloque avec le vent du nord.
+
+| Heure UTC | Couvert au-dessus de H | Situation (satellite) | Masse d'air (AROME) |
+|---|---|---|---|
+| 8 h 08 - 11 h 08 | 4-13 % | mer de nuages | favorable (≤ 10 h), limite (11 h) |
+| 11 h 38 - 13 h 08 | 18-27 % | se dégrade | limite (gradient 4,5-5,7 °C/km) |
+| 13 h 38 - 15 h 08 | 45-52 % | disloquée | défavorable (6,2-7 °C/km) |
+
+Le 31/10 (mer de nuages nette), toutes les images sont classées « mer de nuages », avec 0 à 7 % couvert au-dessus,
+et l'air est favorable. Ces seuils reposent sur ces deux journées seulement et restent à confirmer (été, pluie,
+ciel clair). Après un changement de seuils, `python3 pipeline.py reclasser` recalcule toutes les analyses publiées.
+
+Webapp : l'encadré affiche la dernière image si elle a moins de 90 min. Sinon, il affiche la médiane des mesures
+du même régime sur 3 h au plus, ou à défaut la prévision AROME. La nappe simulée n'est affichée que s'il y a une mer
+de nuages ; sinon, c'est le nuage observé par satellite qui s'affiche.
+
 ## Validation (31/10/2026 et cas passés)
 
 | Date | Capteur | Sommet estimé | Comparaison |

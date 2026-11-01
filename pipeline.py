@@ -16,6 +16,7 @@ from PIL import Image
 from scipy import ndimage
 from rasterio.warp import transform as wtransform
 import mer2nuages as m2n
+import situation as sit
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "web", "data")
@@ -131,9 +132,49 @@ def save_analysis(res, frac20, meta):
     for k in ("remplissage_sous_H", "inclinaison", "angle_zenithal_satellite"):
         if res.get(k) is not None:
             rec[k] = res[k]
+    if rec["sommet_m"] is None and rec["quantiles"][2] is not None:
+        rec["sommet_brut_m"] = rec["quantiles"][2]       # médiane des bords, même si non détectée
+    classer(rec, f, relief_web())
     write_json(f"analyses/{aid}.json", rec)
-    print(f"  {aid}: détectée={rec['detectee']} sommet={rec['sommet_m']} ± {rec['incertitude_m']}")
+    print(f"  {aid}: {rec['situation']} sommet={rec['sommet_m']} ± {rec['incertitude_m']} {rec['metriques']}")
     return rec
+
+
+_RELIEF = None
+def relief_web():
+    """Altitude sur la grille de la webapp (celle des masques), décodée de relief.png."""
+    global _RELIEF
+    if _RELIEF is None:
+        r = np.asarray(Image.open(os.path.join(OUT, "relief.png")).convert("RGB")).astype(float)
+        _RELIEF = r[..., 0] * 256 + r[..., 1] + r[..., 2] / 256 - 32768
+    return _RELIEF
+
+
+def classer(rec, frac, z):
+    """Ajoute à une analyse sa situation (mer, dégradée, disloquée, couvert, dégagé) et ses métriques.
+    `detectee` ne reste vrai que si l'altitude du sommet a un sens (situations sit.VALIDES)."""
+    if "detectee_brute" not in rec:
+        rec["detectee_brute"] = rec["detectee"]
+    h = rec["sommet_m"] if rec["sommet_m"] is not None else rec.get("sommet_brut_m")
+    m = sit.metriques_masque(frac, z, h)
+    rec["metriques"] = {k: (None if v is None else round(v, 3)) for k, v in m.items()}
+    rec["situation"] = sit.classer_image(m, rec["detectee_brute"], h)
+    rec["detectee"] = rec["situation"] in sit.VALIDES
+    if rec["detectee"] and rec["sommet_m"] is None:      # cas rare : non détectée à l'origine
+        rec["detectee"] = False
+    return rec
+
+
+def reclasser():
+    """Recalcule la situation de toutes les analyses déjà publiées, à partir de leur masque."""
+    for f in sorted(glob.glob(os.path.join(OUT, "analyses", "*.json"))):
+        rec = json.load(open(f))
+        if rec.get("sommet_m") is None and rec.get("sommet_brut_m") is None and rec["quantiles"][2] is not None:
+            rec["sommet_brut_m"] = rec["quantiles"][2]
+        frac = np.asarray(Image.open(os.path.join(OUT, rec["masque"])).convert("L")).astype(float) / 255
+        classer(rec, frac, relief_web())
+        write_json(os.path.relpath(f, OUT), rec)
+        print(f"  {rec['id']:30s} {rec['situation']:11s} H={rec['sommet_m'] or rec.get('sommet_brut_m')} {rec['metriques']}")
 
 
 def run_viirs(date):
@@ -215,6 +256,10 @@ def run_mtg(jour=None, pas_min=30, max_images=24):
 
 # ------------------------------------------------------------------ AROME
 NIVEAUX = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600]
+# variables hors profil, et leur nom dans arome.json
+SURFACE = {"temperature_2m": "t2m", "relative_humidity_2m": "rh2m", "cloud_cover_low": "nuages_bas",
+           "cloud_cover_mid": "nuages_moyens", "cloud_cover_high": "nuages_hauts", "precipitation": "pluie",
+           "wind_speed_850hPa": "vent850", "wind_direction_850hPa": "dir850", "wind_speed_700hPa": "vent700"}
 
 
 def sommet_arome(z, rh, t, seuil=80.0, base_max=2000.0):
@@ -236,6 +281,12 @@ def sommet_arome(z, rh, t, seuil=80.0, base_max=2000.0):
     return None
 
 
+def diagnostiquer_air(heures):
+    """Ajoute à chaque heure le diagnostic de masse d'air (stabilité, vent, pluie) : favorable / limite / défavorable."""
+    for hh in heures:
+        hh["air"] = sit.masse_air(hh["profil"], hh.get("vent850"), hh.get("dir850"), hh.get("vent700"), hh.get("pluie"))
+
+
 def lisser(heures):
     """Médiane glissante sur 3 h (l'heuristique heure par heure est bruitée)."""
     vals = [hh["sommet_m"] for hh in heures]
@@ -248,9 +299,14 @@ def run_arome(lat=45.25, lon=5.85):
     var = []
     for p in NIVEAUX:
         var += [f"temperature_{p}hPa", f"relative_humidity_{p}hPa", f"geopotential_height_{p}hPa"]
-    r = requests.get("https://api.open-meteo.com/v1/meteofrance", timeout=60, params={
-        "latitude": lat, "longitude": lon, "hourly": ",".join(var + ["temperature_2m", "relative_humidity_2m", "cloud_cover_low"]),
-        "past_days": 1, "forecast_days": 2, "timezone": "UTC"}).json()
+    def appel(variables):
+        return requests.get("https://api.open-meteo.com/v1/meteofrance", timeout=60, params={
+            "latitude": lat, "longitude": lon, "hourly": ",".join(variables),
+            "past_days": 1, "forecast_days": 2, "timezone": "UTC"}).json()
+    r = appel(var + list(SURFACE))
+    if "hourly" not in r:   # une variable refusée ? on retente avec le strict nécessaire (profil)
+        print("AROME : requête complète refusée :", r.get("reason", r))
+        r = appel(var + ["temperature_2m", "relative_humidity_2m", "cloud_cover_low"])
     if "hourly" not in r:  # quota dépassé, panne... : on garde le fichier précédent
         print("AROME indisponible :", r.get("reason", r)); return
     h = r["hourly"]
@@ -263,8 +319,10 @@ def run_arome(lat=45.25, lon=5.85):
         tt = [h[f"temperature_{p}hPa"][i] for p in niveaux]
         heures.append({"t": t + ":00+00:00", "sommet_m": sommet_arome(z, rh, tt),
                        "profil": [{"p": p, "z": zz, "rh": r_, "T": t_} for p, zz, r_, t_ in zip(niveaux, z, rh, tt)
-                                  if zz is not None and r_ is not None and t_ is not None]})
+                                  if zz is not None and r_ is not None and t_ is not None],
+                       **{nom: h[var][i] for var, nom in SURFACE.items() if var in h}})
     lisser(heures)
+    diagnostiquer_air(heures)
     write_json("arome.json", {"source": "AROME / ARPEGE Météo-France via Open-Meteo", "lat": lat, "lon": lon,
                               "maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
                               "seuil_humidite": 80, "heures": heures})
@@ -277,7 +335,7 @@ def index():
     for f in sorted(glob.glob(os.path.join(OUT, "analyses", "*.json"))):
         r = json.load(open(f))
         recs.append({k: r.get(k) for k in ("id", "date_utc", "capteur", "satellite", "resolution_m", "detectee",
-                                           "sommet_m", "incertitude_m", "remplissage_sous_H")})
+                                           "sommet_m", "incertitude_m", "remplissage_sous_H", "situation", "sommet_brut_m")})
     recs.sort(key=lambda r: r["date_utc"])
     det = [r for r in recs if r["detectee"]]
     write_json("historique.json", {"maj_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
@@ -293,6 +351,9 @@ if __name__ == "__main__":
     elif cmd == "s2": run_s2(int(sys.argv[2]) if len(sys.argv) > 2 else 5)
     elif cmd == "mtg": run_mtg(dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else None)
     elif cmd == "arome": run_arome()
+    elif cmd == "reclasser":       # après un changement de seuils : analyses publiées + diagnostic AROME
+        reclasser()
+        a = json.load(open(os.path.join(OUT, "arome.json"))); diagnostiquer_air(a["heures"]); write_json("arome.json", a)
     elif cmd == "tout":
         if not os.path.exists(os.path.join(OUT, "relief.png")): statique()
         run_mtg(); run_viirs(dt.date.today().strftime("%Y/%m/%d")); run_s2(); run_arome()

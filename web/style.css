@@ -13,6 +13,7 @@
   --series-1: #2a78d6;   /* AROME */
   --series-2: #eb6834;   /* satellite */
   --grid: #e8e7e3;
+  --air-defav: #e3e1db; --air-limite: #f0efeb;
   --good: #1f8a4c; --good-bg: #e3f4ea;
   --warn: #9a6a00; --warn-bg: #fdf1d6;
   --info: #3d4b5c; --info-bg: #e7ecf2;
@@ -29,6 +30,7 @@
     --series-1: #3987e5;
     --series-2: #d95926;
     --grid: #333230;
+    --air-defav: #34332f; --air-limite: #282826;
     --good: #5cc98a; --good-bg: #1d3327;
     --warn: #e5b14a; --warn-bg: #3a2f17;
     --info: #b9c6d6; --info-bg: #263040;
@@ -106,6 +108,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: v
 .chip.good { color: var(--good); background: var(--good-bg); }
 .chip.warn { color: var(--warn); background: var(--warn-bg); }
 .chip.info { color: var(--info); background: var(--info-bg); }
+.hero-air { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+.hero-air:empty { display: none; }
 
 .row-label { display: block; font-size: 13px; color: var(--text-secondary); }
 .row-label strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
@@ -117,10 +121,14 @@ input[type=range] { width: 100%; margin: 8px 0 4px; accent-color: var(--series-1
 .toggles { display: grid; gap: 6px; margin-top: 12px; font-size: 13px; }
 .toggles label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
 .legend i { display: inline-block; vertical-align: middle; margin-right: 5px; }
 .legend .l-line { width: 16px; height: 2px; background: var(--series-1); }
 .legend .l-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--series-2); }
+.legend .l-hollow { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--text-muted); }
+.legend .l-band { width: 12px; height: 10px; background: var(--air-defav); }
+.chart .air-defav { fill: var(--air-defav); }
+.chart .air-limite { fill: var(--air-limite); }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart .axis text { font-size: 10px; fill: var(--text-muted); }
 .chart .grid line { stroke: var(--grid); stroke-width: 1; }
