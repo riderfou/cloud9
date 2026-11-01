@@ -10,6 +10,7 @@ et d'un **modèle numérique de terrain (MNT)**, avec une webapp 3D de visualisa
 | `mer2nuages.py` | Méthode Sentinel-2 (20 m) : masque nuage bas + altitude des bords latéraux |
 | `viirs.py` | Méthode VIIRS (375 m) : fraction nuageuse par pixel + MNT 20 m à l'intérieur du pixel |
 | `mtg.py` | Meteosat MTG-FCI (500 m, toutes les 10 min) : chunk 36 seulement, correction de parallaxe (identifiants EUMETSAT) |
+| `tools/calibrage_mtg.py` | Calibrage MTG sur une journée (variantes parallaxe, seuils, filtre de bord) |
 | `viirs_find.py`, `viirs_fetch.py` | Recherche et téléchargement des passages VIIRS (NOAA, AWS Open Data, sans compte) |
 | `pipeline.py` | Produit les données de la webapp (`web/data/`) : analyses, prévision AROME, relief, sommets |
 | `web/` | Webapp statique (Three.js) : relief 3D, nappe simulée, nuage observé, graphique, sommets |
@@ -24,12 +25,30 @@ python3 pipeline.py tout                     # VIIRS du jour + Sentinel-2 récen
 cd web && python3 -m http.server 8000        # puis http://localhost:8000
 ```
 
-## Meteosat MTG (en cours)
+## Meteosat MTG
 
-`mtg.py` télécharge uniquement le chunk FCI HRFI qui couvre Grenoble (n° 36/40) et corrige la parallaxe
+`mtg.py` télécharge uniquement le chunk FCI HRFI qui couvre Grenoble (n° 36/40, ≈ 22 Mo) et corrige la parallaxe
 (un point à l'altitude z apparaît décalé de ≈ 1,29 z vers le nord). Nécessite `EUMETSAT_CONSUMER_KEY` et
-`EUMETSAT_CONSUMER_SECRET` (environnement local, ou secrets GitHub Actions pour la mise à jour automatique).
-**Recherche catalogue testée (31/10/2026 : chunk 36 présent sur toutes les images, visée 52,4° / az. 188°). Téléchargement bloqué : l'API renvoie 403 « GeneralLicense required to access this collection » (HRFI 0665 et FDHSI 0662) tant que la licence de données MTG n'est pas acceptée sur le compte EUMETSAT. Lecture, seuils du canal 2,2 µm et calibrage contre VIIRS (1 220-1 264 m le 31/10 entre 12 h et 13 h UTC) restent à faire.**
+`EUMETSAT_CONSUMER_SECRET` d'un compte ayant la licence « Meteosat > 1 hr latency » (« < 1 hr » pour le temps réel),
+en local ou en secrets GitHub Actions.
+
+Calibrage du 31/10/2026 (`tools/calibrage_mtg.py`) :
+
+| | 12:08 | 12:38 | 12:48 | 11:58-13:08 (8 images) |
+|---|---|---|---|---|
+| MTG (version actuelle) | – | 1 291 ± 65 m | 1 290 ± 67 m | |
+| MTG sans filtre « contact nappe » | 1 281 | 1 271 | 1 276 | 1 266-1 281 m |
+| MTG sans parallaxe | 1 107 | 610 | 585 | 585-1 153 m (incohérent) |
+| VIIRS | 1 220 (12:01) | 1 234 | 1 264 (12:58) | |
+
+Observation visuelle : 1 300-1 400 m. MTG est 10 à 60 m au-dessus de VIIRS, donc plus proche de l'observation,
+ce qui va dans le sens d'une sous-estimation par VIIRS.
+- La parallaxe est indispensable. La valeur théorique minimise la dispersion, et ±10 % changent le résultat de moins de 20 m.
+- Les seuils du canal 2,2 µm sont peu sensibles (seuils VIIRS : −10 m).
+- Filtre « contact nappe » (`voisin_couvert`) : un pixel de bord doit toucher, à moins de 1 200 m, un pixel entièrement
+  couvert. Sans lui, des pentes rocheuses éclairées de Belledonne créaient un second pic d'altitudes vers 2 200 m,
+  qui comptait plus de pixels que le vrai bord.
+- Pas encore évalué : soleil bas (matin, fin d'après-midi), autres journées.
 
 ```bash
 python3 mtg.py chercher 2026-10-31T10:00 2026-10-31T12:00   # sans compte
