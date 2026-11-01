@@ -307,6 +307,10 @@ def run_lis(jours=10, intervalle_h=6, forcer=False):
     lo, la = wtransform(m2n.CRS, "EPSG:4326", [m2n.AOI[0], m2n.AOI[2], m2n.AOI[0], m2n.AOI[2]], [m2n.AOI[1], m2n.AOI[1], m2n.AOI[3], m2n.AOI[3]])
     bbox = [round(min(lo), 4), round(min(la), 4), round(max(lo), 4), round(max(la), 4)]
     debut = maintenant - dt.timedelta(days=jours)
+    dates = [dt.datetime.strptime(m.group(1), "%Y%m%d").replace(tzinfo=dt.timezone.utc)
+             for m in (re.search(r"_(\d{8})T\d{6}_", n) for n in deja) if m]
+    if dates and not forcer:   # seulement depuis le dernier produit traité (un jour de marge : mises en ligne tardives)
+        debut = max(debut, max(dates) - dt.timedelta(days=1))
     client = py_hydroweb.Client("https://hydroweb.next.theia-land.fr/api")
     panier = py_hydroweb.DownloadBasket(f"mer2nuages_lis_{maintenant:%Y%m%dT%H%M}")
     panier.add_collection(collection_id="LIS_FSC_PREOP", bbox=bbox,
@@ -321,9 +325,8 @@ def run_lis(jours=10, intervalle_h=6, forcer=False):
             print(f"LIS : archive {os.path.getsize(zp) // 1_000_000} Mo, {len(noms)} fichiers ; exemples :", noms[:12])
             z.extractall(tmp)
         tifs = [os.path.join(tmp, n) for n in noms if n.lower().endswith((".tif", ".tiff"))]
-        # fraction « au sol » (corrigée de la forêt) si elle existe, sinon « vue du dessus »
-        fsc = [t for t in tifs if "FSCOG" in os.path.basename(t).upper()] or [t for t in tifs if "FSCTOC" in os.path.basename(t).upper()] \
-              or [t for t in tifs if "FSC" in os.path.basename(t).upper()]
+        # fraction enneigée : LIS_S2-SNOW-FSC_T<tuile>_<date>_<version>.tif (les -QCFLAGS sont des indicateurs de qualité)
+        fsc = [t for t in tifs if re.match(r"LIS_S2-SNOW-FSC_T\w+_\d{8}T\d{6}_", os.path.basename(t))]
         print(f"LIS : {len(tifs)} GeoTIFF, {len(fsc)} de fraction enneigée")
         produits = []
         for t in fsc:
